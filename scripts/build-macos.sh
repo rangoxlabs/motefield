@@ -20,4 +20,3 @@ codesign --force --deep --sign - "${dist_dir}/MoteField.vst3"
 codesign --force --deep --sign - "${dist_dir}/MoteField.component"
 
 echo "Built MoteField VST3 and AU in ${dist_dir}"
-
