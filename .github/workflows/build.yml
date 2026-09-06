@@ -1,0 +1,47 @@
+name: Build plug-ins
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  macos:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build universal plugins and test DSP
+        run: bash scripts/build-macos.sh
+      - name: Package development installer
+        run: bash scripts/package-macos.sh --unsigned
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MoteField-macOS-universal-UNSIGNED
+          path: dist/installers/*
+          if-no-files-found: error
+
+  windows:
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build x64 plugin and test DSP
+        shell: pwsh
+        run: ./scripts/build-windows.ps1
+      - name: Install Inno Setup
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) {
+            choco install innosetup --yes --no-progress
+            if ($LASTEXITCODE -ne 0) { throw "Inno Setup installation failed" }
+          }
+      - name: Package development installer
+        shell: pwsh
+        run: ./scripts/package-windows.ps1 -Unsigned
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MoteField-Windows-x64-UNSIGNED
+          path: dist/installers/*
+          if-no-files-found: error

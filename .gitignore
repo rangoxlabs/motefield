@@ -1,0 +1,14 @@
+/build*/
+/dist/
+/Binaries/
+/Design/
+/.*/
+!/.github/
+.env*
+*.pem
+*.p12
+*.pfx
+.DS_Store
+*.user
+*.suo
+*.xcodeproj/project.xcworkspace/xcuserdata/
