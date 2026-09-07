@@ -12,6 +12,24 @@ Restores the voice-driven implicit fluid surface in place of the incorrectly ret
 - ZIP SHA-256: `d1823b8b8a9205f38dfedf9452ce44b7de588bc2587d825befbd83a2e5553692`.
 
 
+### Windows 0.3.3
+
+[Windows build run 34089684372](https://github.com/rangoxlabs/motefield/actions/runs/34089684372) passed at commit `3d371c8`.
+
+- Native x64 build passed; DSP and click tests passed in 19.26 and 2.75 seconds.
+- Extracted direct-install ZIP passed fresh installation, replacement backup, installed-binary hash comparison, and rejection of a deliberately corrupted payload before installation.
+- The unsigned Inno installer installed version 0.3.3 with a matching binary, and its uninstaller passed.
+- Downloaded ZIP checksum and CRC passed locally; the bundle contains a Windows x64 PE binary and reports version 0.3.3.
+- ZIP SHA-256: `ab434e8e915b7bc5019df790684865ca969f2398c4e993ed3eaab2865ccc66a0`.
+- Native Windows DAW playback and Windows ARM remain unqualified.
+
+### Promo revision 2
+
+Three native processor/editor captures render at 1920 x 1080, 30 fps: fantasy (60 seconds), dark R&B (57.6 seconds), and looper (48 seconds). Each preset tour covers eight presets, with one bar dry and two bars processed. Checks confirm Mix is zero during dry sections and restored to the preset value for processed sections, and looper chapters enter the expected transport states.
+
+Each comparison repeats an identical source bar; all eight pairs in each tour have measurable processed-audio differences. Encoded AAC true peaks are -7.7 dBFS for fantasy and -2.0 dBFS for R&B and looper. Individual videos are below 6 MB, and the three-video archive is 15.8 MB. These are offline captures with editorial labels, not real-time screen recordings.
+
+
 ## Version 0.3.2
 
 The approved clear Acid interface was built as universal macOS VST3, AU, standalone, and native preview binaries. VST3 and AU are installed locally, report 0.3.2, and match the staged release executables byte-for-byte. Previous bundles were backed up before replacement.

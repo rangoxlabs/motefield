@@ -6,7 +6,7 @@ The clear enclosure, sculpted knob rails, and Acid lighting surround a pearl fer
 
 ![MoteField interface](docs/images/motefield.png)
 
-**Current version: 0.3.3 development.** Universal macOS VST3 and AU builds are installed and validated locally. The expanded DSP, processor, and native UI checks pass. See the verification record for platform limits. Windows x64 build and installer automation is included; Windows host compatibility is still being verified. This is a development release.
+**Current version: 0.3.3 development.** Universal macOS VST3 and AU builds are installed and validated locally. The expanded DSP, processor, and native UI checks pass. See the verification record for platform limits. Windows x64 build, DSP/click tests, direct-install ZIP checks, and installer/uninstaller checks pass. Native Windows DAW playback is still being verified. This is a development release.
 
 ## Included effects
 
