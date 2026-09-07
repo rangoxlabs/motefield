@@ -3,6 +3,7 @@
 #include <JuceHeader.h>
 
 #include "DSP.h"
+#include <mutex>
 
 namespace motefield::parameter
 {
@@ -32,7 +33,7 @@ inline constexpr auto bypass = "bypass";
 inline constexpr std::array<const char*, 6> looperTriggers { "loopRecordTrigger", "loopPlayTrigger", "loopDubTrigger", "loopStopTrigger", "loopUndoTrigger", "loopEraseTrigger" };
 } // namespace motefield::parameter
 
-class MoteFieldAudioProcessor final : public juce::AudioProcessor, private juce::AudioProcessorValueTreeState::Listener
+class MoteFieldAudioProcessor final : public juce::AudioProcessor, private juce::AudioProcessorValueTreeState::Listener, private juce::Timer
 {
 public:
     MoteFieldAudioProcessor();
@@ -49,15 +50,15 @@ public:
     bool hasEditor() const override { return true; }
 
     const juce::String getName() const override { return JucePlugin_Name; }
-    bool acceptsMidi() const override { return false; }
+    bool acceptsMidi() const override { return true; }
     bool producesMidi() const override { return false; }
     bool isMidiEffect() const override { return false; }
     double getTailLengthSeconds() const override { return 24.0; }
 
-    int getNumPrograms() override { return 1; }
-    int getCurrentProgram() override { return 0; }
-    void setCurrentProgram (int) override {}
-    const juce::String getProgramName (int) override { return {}; }
+    int getNumPrograms() override { return 32; }
+    int getCurrentProgram() override { return currentProgram.load(); }
+    void setCurrentProgram (int index) override;
+    const juce::String getProgramName (int index) override { return factoryPresetNames()[juce::jlimit (0,31,index)]; }
     void changeProgramName (int, const juce::String&) override {}
 
     void getStateInformation (juce::MemoryBlock& destinationData) override;
@@ -75,6 +76,15 @@ public:
     void setParameterValue (const char* id, float value);
     void applyFactoryPreset (int index);
     static juce::StringArray factoryPresetNames();
+    juce::Result exportAudio (const juce::File&, int historyBars = 0);
+    juce::Result captureHistory (int bars);
+    juce::MemoryBlock loopData();
+    bool restoreLoopData (const juce::MemoryBlock&);
+    void learnMidi (int parameterIndex) { midiLearn.store (parameterIndex); }
+    int learnedController() const { return lastLearned.load(); }
+    void clearMidiMappings();
+    static const std::vector<juce::String>& extendedParameterIds();
+
     static juce::File userPresetDirectory();
     static juce::Array<juce::File> userPresetFiles (juce::File directory = {});
     juce::Result saveUserPreset (const juce::String& name, bool overwrite = false, juce::File directory = {});
@@ -89,10 +99,25 @@ public:
     static juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
 
 private:
+    static void addPerformanceParameters (juce::AudioProcessorValueTreeState::ParameterLayout&);
+    void timerCallback() override;
+    void processAudio (juce::AudioBuffer<float>&, int offset, int samples);
     void parameterChanged (const juce::String&, float) override;
     void rememberPreset (const juce::String& name, const juce::String& source);
     static float decibelsToGain (float decibels) noexcept;
     motefield::Engine engine;
+    std::array<std::atomic<int>, 128> midiMap;
+    std::atomic<int> currentProgram { 0 };
+    std::atomic<int> midiLearn { -1 }, lastLearned { -1 }, requestedProgram { -1 };
+    std::vector<juce::RangedAudioParameter*> midiTargets;
+    std::array<int, 128> previousCC {};
+    std::atomic<double> beatsPerBar { 4.0 };
+    bool previousBurst = false;
+    std::mutex archiveMutex;
+    juce::MemoryBlock pendingLoopData;
+    bool prepared = false;
+    double currentSampleRate = 44100.0;
+
     std::atomic<double> effectiveBpm { 120.0 };
     std::atomic<bool> receivingHostTempo { false };
     std::atomic<unsigned> pendingLooperTriggers { 0 };

@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.22)
 
-project(MoteField VERSION 0.2.6 LANGUAGES C CXX)
+project(MoteField VERSION 0.3.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -31,7 +31,7 @@ juce_add_plugin(MoteField
     PRODUCT_NAME "MoteField"
     DESCRIPTION "Tempo-aware granular, glitch, delay, freeze, and phrase-loop effect"
     IS_SYNTH FALSE
-    NEEDS_MIDI_INPUT FALSE
+    NEEDS_MIDI_INPUT TRUE
     NEEDS_MIDI_OUTPUT FALSE
     IS_MIDI_EFFECT FALSE
     EDITOR_WANTS_KEYBOARD_FOCUS FALSE
@@ -49,6 +49,8 @@ target_sources(MoteField PRIVATE
     Source/PluginProcessor.cpp
     Source/PluginProcessor.h
     Source/Presets.cpp
+    Source/Performance.cpp
+    Source/PerformancePanel.h
     Source/PluginEditor.cpp
     Source/PluginEditor.h
 )

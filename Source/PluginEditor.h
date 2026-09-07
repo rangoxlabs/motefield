@@ -1,6 +1,7 @@
 #pragma once
 #include <JuceHeader.h>
 #include "PluginProcessor.h"
+#include "PerformancePanel.h"
 
 class MoteFieldLookAndFeel final : public juce::LookAndFeel_V4
 {
@@ -34,16 +35,24 @@ public:
     juce::String title;
 };
 
-class FieldDisplay final : public juce::Component
+class FieldDisplay final : public juce::Component, public juce::TooltipClient
 {
 public:
     void paint (juce::Graphics&) override;
     void update (const motefield::VisualFrame&);
+    std::function<void(const char*, float, int)> gesture;
+    void mouseDown (const juce::MouseEvent&) override;
+    void mouseDrag (const juce::MouseEvent&) override;
+    void mouseUp (const juce::MouseEvent&) override;
+    void mouseDoubleClick (const juce::MouseEvent&) override;
+    juce::String getTooltip() override { return "Drag liquid to scan / transpose. Shift-drag stretches. Alt-drag splits voices. Double-click resets."; }
     void setShape (float value) { shape = value; }
     void setSampleRate (double value) { sampleRate = value > 0.0 ? value : 48000.0; }
     void setReducedMotion (bool enabled) { reducedMotion = enabled; repaint(); }
     const motefield::VisualFrame& currentFrame() const { return frame; }
 private:
+    juce::Point<float> dragStart;
+    float startX = 0.f, startY = 0.f; int gestureMode = 0; bool dragging = false;
     struct LiquidVoice
     {
         std::uint64_t id = 0;
@@ -124,7 +133,9 @@ private:
     juce::TextButton reverseButton, syncButton, tapButton, holdButton, bypassButton;
     juce::TextButton recordButton, playButton, dubButton, stopButton, undoButton, eraseButton;
     juce::TextButton preButton, postButton, loopReverseButton, detailsButton, motionButton;
-    juce::TextButton previousPreset, nextPreset, savePresetButton;
+    juce::TextButton previousPreset, nextPreset, savePresetButton, performanceButton;
+    std::unique_ptr<PerformancePanel> performancePanel;
+    bool momentaryHoldDown = false;
     juce::ComboBox presetBox, roomBox, speedBox, divisionBox;
     std::vector<std::unique_ptr<ButtonAttachment>> buttonAttachments;
     std::vector<std::unique_ptr<ComboAttachment>> comboAttachments;

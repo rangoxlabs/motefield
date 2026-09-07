@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <vector>
 
 namespace motefield
 {
@@ -39,7 +40,7 @@ enum class LooperCommand : int
     record,
     play,
     dub,
-    stop
+    stop, burstStart, burstEnd
 };
 
 enum class LooperState : int
@@ -75,6 +76,21 @@ struct EngineParameters
     bool looperReverse = false;
     bool looperBeforeEffect = false;
     bool bypass = false;
+    bool quantize = false, looperOnly = false, trails = false;
+    float loopFade = 0.0f;
+    int fadeMode = 0;
+    bool recordIntoDub = false;
+    double hostPpq = 0.0;
+    bool hostPositionValid = false, hostPlaying = false;
+    float viscosity = 0.25f, cohesion = 0.5f, tension = 0.5f;
+    float fieldPosition = 0.0f, fieldPitch = 0.0f, fieldStretch = 1.0f, fieldSplit = 0.0f;
+    float magnetAmount = 0.0f, magnetAttack = 0.01f, magnetRelease = 0.25f;
+    int magnetMode = 0;
+    const float* sidechain = nullptr;
+    int seed = 1, rhythmMutation = 0, pitchMutation = 0, scale = 0, root = 0, sourceNote = 0;
+    bool patternLock = false;
+    int patternSteps = 16;
+
 };
 
 // A bounded, audio-thread-produced snapshot. The editor never reads live DSP buffers.
@@ -103,6 +119,9 @@ struct VisualFrame
     float inputLevel = 0.0f, effectLevel = 0.0f, outputLevel = 0.0f;
     // Post-output low/mid/high band RMS envelopes; visual analysis only.
     std::array<float, 3> spectralEnergy {};
+    float viscosity = .25f, cohesion = .5f, tension = .5f, magnet = 0.f;
+    float fieldPosition = 0.f, fieldPitch = 0.f, fieldStretch = 1.f, fieldSplit = 0.f;
+    bool loopPending = false;
     float loopSeconds = 0.0f, loopProgress = 0.0f;
     LooperState loopState = LooperState::empty;
     bool held = false, reverse = false, bypass = false, canUndo = false;
@@ -110,6 +129,13 @@ struct VisualFrame
     std::array<float, 128> loopWaveform {};
     // Chronological min/max bins of the final stereo output (~320 ms).
     std::array<std::array<float, outputPoints>, 2> outputLow {}, outputHigh {};
+};
+
+struct AudioSnapshot
+{
+    double sampleRate = 44100.0;
+    bool playing = false;
+    std::array<std::vector<float>, 2> audio;
 };
 
 class Engine
@@ -130,6 +156,10 @@ public:
                   int samples,
                   const EngineParameters& parameters);
 
+    // File conversion and snapshot allocation happen on the caller, never in process().
+    AudioSnapshot snapshotLoop();
+    bool restoreLoop (const AudioSnapshot&);
+    AudioSnapshot snapshotHistory (double seconds);
     void requestLooperCommand (LooperCommand command) noexcept;
     [[nodiscard]] LooperState getLooperState() const noexcept;
     [[nodiscard]] float getLooperProgress() const noexcept;

@@ -6,7 +6,7 @@ The worn cream enclosure, organic black print, and reactive Rango Labs mark surr
 
 ![MoteField interface](docs/images/motefield.png)
 
-**Current version: 0.2.6.** macOS universal VST3 and AU builds have been built, installed, and validated. Windows x64 build and installer automation is included; Windows host compatibility is still being verified. This is a development release.
+**Current version: 0.3.0 development.** Universal macOS VST3 and AU builds are installed and validated locally. The expanded DSP, processor, and native UI checks pass. See the verification record for platform limits. Windows x64 build and installer automation is included; Windows host compatibility is still being verified. This is a development release.
 
 ## Included effects
 
@@ -24,7 +24,7 @@ Select an effect by turning the mode dial or clicking its name. The pointer alig
 | Glitch | **Break** | Produces intermittent bursts with gaps between them. Activity changes the likelihood and rate of events; detected attacks can trigger fresh fragments. Variations change pitch and playback speed. |
 | Glitch | **Ladder** | Steps individual fragments through repeating pitch-ratio sequences, using recent note attacks when available. Variations offer ascending, descending, octave, or reordered patterns; D adds amplitude quantization. |
 | Multi Delay | **Grid** | Creates tempo-related stereo tap patterns. Activity changes the tap count, Repeats controls feedback, and A-D selects the timing arrangement. Grid uses a delay-tap view because Shape does not affect this mode. |
-| Multi Delay | **Smear** | Blends multi-tap delay with granular playback. Shape changes modulation, smoothing, cross-feedback, and grain envelopes, turning distinct repeats into a more diffuse texture. |
+| Multi Delay | **Smear** | Blends multi-tap delay with granular playback and independently filtered taps. Variation B adds bandpass-style tap filtering; C adds octave-shifted taps. Shape changes modulation, smoothing, cross-feedback, and grain envelopes, turning distinct repeats into a more diffuse texture. |
 
 ### Shared processing
 
@@ -77,7 +77,7 @@ Record up to 60 seconds and layer it independently of the selected effect.
 | **Loop Reverse** | Reverse phrase playback independently of FX Reverse. |
 | **Loop Speed** | Play at half, normal, or double speed. Available in Details. |
 
-**Recorded loop audio is temporary.** Render or record the output to a DAW track before closing the project. Sound parameters persist in sessions; phrase audio does not survive plug-in reloads or sample-rate changes.
+**Recorded loop audio now saves with DAW projects and user presets.** Overdubs are mixed into the saved phrase; undo history is not serialized. Restoring at a different sample rate resamples the saved audio. Saving during an overdub takes a live snapshot; pause overdubbing first if you need an exact final take.
 
 ## Presets and automation
 
@@ -88,11 +88,54 @@ User presets are portable `.motefield` files stored in:
 - macOS: `~/Library/Application Support/Rango Labs/MoteField/Presets`
 - Windows: `%APPDATA%/Rango Labs/MoteField/Presets`
 
-Use **Refresh user presets** after copying files into that folder. User presets save 21 sound, timing, and routing parameters. They leave Hold, Bypass, transport commands, and recorded phrase audio untouched. Factory presets retain the current timing/sync and looper configuration.
+Use **Refresh user presets** after copying files into that folder. User presets save 49 sound, timing, routing, and performance settings, plus recorded phrase audio when present. Hold, Bypass, and transport gates are excluded. Presets containing a phrase replace the current phrase; sound-only presets retain it. Earlier version-1 preset files remain readable, with defaults for the new controls. Factory presets retain the current timing/sync and looper configuration.
 
-All **29 exposed audio parameters** support host automation, including Mode, Variation, Hold, Bypass, and six looper command triggers. UI edits notify the host, allowing automation recording where the DAW supports it. Tap writes Tempo and Host Sync; display preferences are not audio parameters.
+All **58 exposed parameters** support host automation, including Mode, Variation, Hold, Bypass, and six looper command triggers. UI edits notify the host, allowing automation recording where the DAW supports it. Tap writes Tempo and Host Sync; display preferences are not audio parameters.
 
 Looper triggers execute on each **0-to-1 or 1-to-0 transition**. Alternate values for repeated commands; a held value does not retrigger. Commands apply at the next processing block, and repeated edges of the same command within a block coalesce. Avoid simultaneous conflicting transport commands. DAW-specific automation behavior still needs host testing.
+
+## Performance controls
+
+Open **PERFORM** above the fluid display. Its three pages scroll within the existing plug-in window.
+
+### Loop & Capture
+
+- **Quantize loop:** arm record, play, overdub, or stop for the next quarter-note beat. With host sync enabled, timing uses the DAW's beat position. A host seek rebases an armed command. Changing tempo after recording does not time-stretch the phrase to the new tempo. Erase, Undo, and Burst remain immediate.
+- **Continuous loop speed:** choose between the existing stepped speeds and a smooth 0.25–4x rate. Changing speed also changes pitch; this is varispeed, not pitch-preserving time stretch.
+- **Loop fade:** choose a 0–10 second start/stop fade and in/out direction.
+- **Looper only:** bypass granular rearrangement while retaining the filter, pitch modulation, and reverb.
+- **Close recording into:** choose playback or immediate overdubbing.
+- **Hold to capture Burst:** recording lasts while the button is pressed, then plays on release. Another press replaces the phrase. The Burst gate is also automatable.
+- **Bypass trails:** stop feeding new audio, release Hold, fade the phrase, and let effect tails decay while dry audio passes through.
+- **Hold behavior:** toggle or momentary operation for the main Hold pad.
+- **Capture 1 / 2 / 4 bars:** replace the phrase with the most recent processed output. The rolling history holds up to 32 seconds and uses the host time signature when available. Early captures contain only the audio received so far; capture ends at the click, not at the previous bar line.
+- **Export / Drag Loop WAV:** click to save a stereo 24-bit WAV, or drag it onto a compatible DAW track. Dragged exports remain in the MoteField `Exports` folder beside `Presets`, so a project can continue referencing them.
+
+### Material & Magnet
+
+The fluid display controls real playback. Drag horizontally to scan older captured audio and vertically to transpose by up to two octaves. Shift-drag changes grain duration; Alt-drag adds voices. Double-click resets the gesture. Each gesture records host automation.
+
+| Control | Audible behavior |
+| --- | --- |
+| **Viscosity** | Slows the response of capture position, transposition, and stretch; also slows the display's settling. |
+| **Cohesion** | Narrows or spreads voice/tap panning and gathers or separates visual bodies. |
+| **Tension** | Sharpens grain envelopes; in delay modes it changes tap filtering. |
+| **Capture position** | Reads further back into the available audio history. |
+| **Field pitch** | Transposes grains or pitch-shifts delay taps. |
+| **Grain stretch** | Extends grain envelopes; changes tap spacing in delay modes. |
+| **Split voices** | Adds grains or taps within the engine's bounded voice limits. |
+
+Enable the mono **Magnet** sidechain bus in your DAW and feed another track into it. **Compress** ducks and tightens the processed texture, **Trigger** launches granular events when the follower crosses its threshold, and **Attract** gathers the voices' stereo positions. Amount, attack, and release are adjustable. Trigger applies to granular modes; Grid remains a tapped delay. With no sidechain input, the magnet has no external signal to follow.
+
+The surface remains a ferrofluid-inspired interpretation with damped motion, not a physical magnetic-fluid simulation. Its gestures control the field as a whole.
+
+### Pattern & MIDI
+
+**Pattern seed** reproduces the engine's random choices from the same input and starting timeline position. **Lock pattern** repeats its sequence of choices over 1–64 events and suppresses input-onset retriggering. It does not freeze source audio. **Mutate rhythm** changes event spacing/probability; **Mutate pitch** adds repeatable pitch intervals independently. Delay modes mutate tap spacing and pitch.
+
+Choose **Source note**, **Scale root**, and a major, minor, or pentatonic scale to constrain grain transpositions. Source note is set manually; this does not detect and retune every note in polyphonic audio. Sweeps can travel between the constrained endpoints. Grid's delay taps do not use the grain scale controls.
+
+Select a parameter and click **Learn next MIDI CC**, then move a controller. Mappings save with the DAW project. Defaults: CC1 controls Drift depth, CC11 controls Mix, and CC64 controls Hold. Transport CCs act on a rising press and ignore release, while the Burst gate records until released. MIDI CC events are applied at their sample offsets. Program changes 1–32 select factory presets through the message-thread preset loader, so preset changes are not sample-accurate. Host automation remains available independently of MIDI routing.
 
 ## Audio-reactive display
 
@@ -122,6 +165,8 @@ The script builds universal Apple Silicon/Intel VST3 and AU bundles, runs the DS
 - `~/Library/Audio/Plug-Ins/Components/MoteField.component`
 
 Reopen your DAW, enable VST3/AU scanning, and rescan if needed. Load MoteField on an audio track receiving a signal. Start with **First Light**, raise Mix, and try Hold on a sustained chord.
+
+For private Mac testing without a notarized installer, run `bash scripts/package-friend-macos.sh`. The ZIP includes both plug-ins, a per-user installation script, and `START HERE.txt`. The script verifies the files and clears download quarantine only on its newly installed MoteField copies. It does not change global security settings.
 
 Create a development installer with `bash scripts/package-macos.sh --unsigned`. See [release preparation](RELEASE.md) for signed distribution.
 
@@ -161,7 +206,7 @@ cmake --build build --target MoteFieldPreview --config Release --parallel 2
 ./build/MoteFieldPreview /absolute/path/to/preview-output --stills-only
 ```
 
-See [verification](VERIFICATION.md) for completed checks and remaining platform testing. High feedback and stacked loops can exceed full scale; Output controls the effect path and Loop Level controls the phrase contribution. Dedicated MIDI CC learn and phrase-audio persistence are not implemented.
+See [verification](VERIFICATION.md) for completed checks and remaining platform testing. High feedback and stacked loops can exceed full scale; Output controls the effect path and Loop Level controls the phrase contribution. Direct MIDI routing and external audio dragging depend on host support. The AU retains its original effect identity for existing projects; MIDI-controlled operation is best tested with VST3 in hosts that route MIDI to audio effects.
 
 ## License
 

@@ -145,7 +145,7 @@ void checkPresetsAndAutomation (MoteFieldAudioProcessor& processor, const juce::
     require (std::abs (processor.parameters.getRawParameterValue (shape)->load() - .8123f) < .0001f, "invalid preset partially changed sound");
     require (processor.saveUserPreset ("Orbital test", true, directory).wasOk(), "explicit replacement failed");
 
-    require (processor.getParameters().size() == 29, "host parameter count changed unexpectedly");
+    require (processor.getParameters().size() == 58, "host parameter count changed unexpectedly");
     std::set<juce::String> ids;
     for (auto* parameter : processor.getParameters())
     {
@@ -184,7 +184,45 @@ void checkPresetsAndAutomation (MoteFieldAudioProcessor& processor, const juce::
     trigger (3); require (processor.getLooperState() == motefield::LooperState::stopped, "host Stop trigger failed");
     trigger (5); require (processor.getLooperState() == motefield::LooperState::empty, "host Erase trigger failed");
     processor.setParameterValue (freeze, 0.f);processor.setParameterValue (bypass, 0.f);
-    std::cout << "Preset/automation checks passed: 32 factory presets, all 11 modes, disk round trip, overwrite protection, invalid-file rejection, session identity, 29 host parameters and looper triggers.\n";
+    std::cout << "Preset/automation checks passed: 32 factory presets, all 11 modes, disk round trip, overwrite protection, invalid-file rejection, session identity, 58 host parameters and looper triggers.\n";
+}
+void checkPerformanceIntegration (const juce::File& root)
+{
+    const auto destination = root.getNonexistentChildFile ("integration-checks", {}, false);
+    require (destination.createDirectory().wasOk(),"integration folder creation failed");
+    MoteFieldAudioProcessor p; p.prepareToPlay (48000,400);
+    p.setParameterValue ("mix",0); p.setParameterValue ("looperOrder",1); p.setParameterValue ("looperLevel",1);
+    juce::AudioBuffer<float> block (2,400); juce::MidiBuffer midi;
+    const auto tick = [&] { for (int c = 0; c < 2; ++c) for (int i = 0; i < 400; ++i) block.setSample (c,i,.15f); p.processBlock (block,midi); };
+    int recordIndex = -1; for (auto* param : p.getParameters()) if (auto* ranged = dynamic_cast<juce::RangedAudioParameter*> (param)) if (ranged->paramID == "loopRecordTrigger") recordIndex = param->getParameterIndex();
+    require (recordIndex >= 0,"record parameter absent"); p.learnMidi (recordIndex);
+    midi.addEvent (juce::MidiMessage::controllerEvent (1,20,127),128); tick();
+    require (p.getLooperState() == motefield::LooperState::recording,"MIDI learn did not start recording");
+    midi.addEvent (juce::MidiMessage::controllerEvent (1,20,0),0); tick();
+    require (p.getLooperState() == motefield::LooperState::recording,"MIDI release retriggered record");
+    p.requestLooperCommand (motefield::LooperCommand::play); tick();
+    auto data = p.loopData(); juce::MemoryInputStream dataReader (data,false); dataReader.setPosition (13);
+    require (dataReader.readInt() == 672,"MIDI record command did not respect sample offset");
+    const auto wav = destination.getChildFile ("loop-export.wav"); require (p.exportAudio (wav).wasOk(),"WAV export failed");
+    juce::AudioFormatManager formats; formats.registerBasicFormats(); std::unique_ptr<juce::AudioFormatReader> reader (formats.createReaderFor (wav));
+    require (reader != nullptr && reader->lengthInSamples == 672 && reader->numChannels == 2,"WAV dimensions incorrect");
+    juce::MemoryBlock saved; p.getStateInformation (saved);
+    MoteFieldAudioProcessor reopened; reopened.setStateInformation (saved.getData(),static_cast<int> (saved.getSize())); reopened.prepareToPlay (48000,400);
+    block.clear(); reopened.processBlock (block,midi);
+    require (reopened.getLooperState() == motefield::LooperState::playing && reopened.loopData() == data,"session loop audio did not round trip");
+    auto layouts = reopened.getBusesLayout(); layouts.inputBuses.set (1,juce::AudioChannelSet::mono()); require (reopened.setBusesLayout (layouts),"mono magnet bus layout rejected");
+    juce::AudioBuffer<float> sideBlock (3,400); sideBlock.clear(); for (int i = 0; i < 400; ++i) sideBlock.setSample (2,i,.8f);
+    reopened.setParameterValue ("magnetAmount",1); for (int tick = 0; tick < 4; ++tick) reopened.processBlock (sideBlock,midi);
+    motefield::VisualFrame frame; reopened.readVisualFrame (frame); require (frame.magnet > 0,"sidechain did not reach engine");
+    require (p.saveUserPreset ("Loop archive",false,destination).wasOk(),"audio preset save failed");
+    p.requestLooperCommand (motefield::LooperCommand::clear); tick();
+    require (p.loadUserPreset (destination.getChildFile ("Loop archive.motefield")).wasOk(),"audio preset load failed"); tick();
+    require (p.loopData() == data,"preset loop audio did not round trip");
+    require (p.captureHistory (1).wasOk(),"history capture failed"); tick();
+    require (p.loopData().getSize() > data.getSize(),"history capture did not replace loop");
+    juce::MemoryBlock broken (data); static_cast<char*> (broken.getData())[0] = 0;
+    require (! p.restoreLoopData (broken),"corrupt audio archive accepted");
+    std::cout << "Integration: sample-offset MIDI learn, release behavior, WAV export, session/preset audio recall, sidechain routing, history capture and corrupt-audio rejection passed.\n";
 }
 }
 
@@ -196,6 +234,7 @@ int main (int argc, char** argv)
         const juce::File destination (argc > 1 ? juce::String (argv[1]) : juce::File::getCurrentWorkingDirectory().getChildFile ("Design").getFullPathName());
         require (destination.createDirectory().wasOk(), "cannot create preview directory");
         MoteFieldAudioProcessor processor;
+        checkPerformanceIntegration (destination);
         processor.prepareToPlay (48000.0, 400);
         PlayHead playhead;
         processor.setPlayHead (&playhead);
@@ -207,6 +246,15 @@ int main (int argc, char** argv)
             auto* knob = dynamic_cast<juce::Slider*> (find (*editor, id));
             require (knob != nullptr && knob->getTextFromValue (.984136) == "98%", "percentage formatting is not rounded");
         }
+        auto* field = dynamic_cast<FieldDisplay*> (find (*editor,"field")); require (field != nullptr,"interactive field missing");
+        auto* pitchParameter = processor.parameters.getParameter ("fieldPitch"); HostParameterObserver fieldHost; pitchParameter->addListener (&fieldHost);
+        const auto makeMouse = [&] (float x,float y,int clicks)
+        { return juce::MouseEvent (juce::Desktop::getInstance().getMainMouseSource(),{x,y},juce::ModifierKeys (juce::ModifierKeys::leftButtonModifier),1.f,0.f,0.f,0.f,0.f,field,field,juce::Time::getCurrentTime(),{100.f,80.f},juce::Time::getCurrentTime(),clicks,true); };
+        field->mouseDown (makeMouse (100,80,1)); field->mouseDrag (makeMouse (140,60,1)); field->mouseUp (makeMouse (140,60,1));
+        require (processor.parameters.getRawParameterValue ("fieldPitch")->load() > 0 && fieldHost.starts == 1 && fieldHost.ends == 1,"fluid drag did not notify host with a complete gesture");
+        field->mouseDown (makeMouse (100,80,2)); field->mouseDoubleClick (makeMouse (100,80,2)); field->mouseUp (makeMouse (100,80,2));
+        require (std::abs (processor.parameters.getRawParameterValue ("fieldPitch")->load()) < .001f,"double-click did not reset field pitch");
+        require (fieldHost.starts == fieldHost.ends,"double-click left an automation gesture open"); pitchParameter->removeListener (&fieldHost);
         auto* presetMenu = dynamic_cast<juce::ComboBox*> (find (*editor, "presets"));
         bool saveLabelFound = false;
         for (juce::PopupMenu::MenuItemIterator item (*presetMenu->getRootMenu()); item.next();)
@@ -309,6 +357,13 @@ int main (int argc, char** argv)
         click (*editor, "details");
         editor->setSize (1000, 645);
         saveImage (*editor, destination.getChildFile ("motefield-small.png"));
+        click (*editor,"perform");
+        auto* panel = find (*editor,"performance-panel"); require (panel != nullptr && panel->isVisible(),"performance panel did not open");
+        require (editor->getLocalBounds().contains (panel->getBounds()),"performance panel exceeds window");
+        auto* pages = dynamic_cast<juce::ComboBox*> (find (*editor,"perform-pages")); require (pages != nullptr,"performance pages missing");
+        for (int page = 1; page <= 3; ++page)
+        { pages->setSelectedId (page,juce::sendNotificationSync); saveImage (*editor,destination.getChildFile ("motefield-perform-" + juce::String (page) + ".png")); }
+        click (*editor,"perform-close"); require (! panel->isVisible(),"performance panel did not close");
         editor->setSize (1240, 800);
         std::cout << "UI checks passed: 11 modes, 4 variations, synced/manual Time, performance pads, state restore, looper controls, Details and resizing.\n";
         if (argc > 2 && juce::String (argv[2]) == "--stills-only")

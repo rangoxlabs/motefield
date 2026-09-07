@@ -8,6 +8,7 @@
 #include <new>
 #include <string>
 #include <vector>
+#include <thread>
 
 namespace { thread_local bool watchingAudioAllocations = false; thread_local int audioAllocations = 0; }
 void* operator new (std::size_t size)
@@ -438,10 +439,105 @@ void testOversizedBuffersAndBypass()
     require (audioAllocations == 0, "audio callback allocated heap memory for an oversized buffer");
     require (std::abs (signal.back() - .25f) < .00001f, "bypass did not return dry input with in-place mono processing");
 }
+void testPerformanceFeatures()
+{
+    motefield::Engine engine; engine.prepare (sampleRate, 256, 2);
+    motefield::EngineParameters p; p.mix = 0; p.looperBeforeEffect = true; p.looperLevel = 1;
+    std::vector<float> in (256, .1f), l (256), r (256), side (256, .6f);
+    const float* input[] { in.data(), in.data() }; float* output[] { l.data(), r.data() };
+    const auto run = [&] (int count)
+    { while (count > 0) { const auto n = std::min (256, count); audioAllocations = 0; watchingAudioAllocations = true;
+        engine.process (input, output, 2, n, p); watchingAudioAllocations = false;
+        require (audioAllocations == 0, "performance feature allocated on audio thread");
+        if (p.hostPositionValid && p.hostPlaying) p.hostPpq += n / (sampleRate * 60.0 / p.bpm); count -= n; } };
+    // Record and close precisely on successive quarter-note boundaries.
+    p.quantize = true; p.hostPositionValid = true; p.hostPlaying = true; p.hostPpq = .25;
+    engine.requestLooperCommand (motefield::LooperCommand::record); run (1000);
+    require (engine.getLooperState() == motefield::LooperState::empty, "quantized record started before the beat");
+    motefield::VisualFrame visual; engine.readVisualFrame (visual); require (visual.loopPending, "armed command missing from telemetry");
+    run (18000); require (engine.getLooperState() == motefield::LooperState::recording, "quantized record did not start on beat");
+    engine.requestLooperCommand (motefield::LooperCommand::play); run (24000);
+    auto saved = engine.snapshotLoop();
+    require (saved.audio[0].size() == 24000, "quantized loop is not exactly one beat");
+    require (saved.playing, "saved loop lost playback state");
+    require (std::abs (saved.audio[0][100] - .1f) < 1.e-6f, "snapshot changed loop samples");
+    p.quantize = false; engine.requestLooperCommand (motefield::LooperCommand::clear); run (256);
+    require (engine.restoreLoop (saved), "loop restore staging failed"); run (256);
+    require (engine.getLooperState() == motefield::LooperState::playing, "restored loop did not resume");
+    require (engine.snapshotLoop().audio[0] == saved.audio[0], "restored loop samples differ");
+    // Snapshot copies may run concurrently with recording/overdubbing.
+    std::atomic<bool> copying { true }; std::thread reader ([&] { for (int i = 0; i < 12; ++i) { const auto copy = engine.snapshotLoop(); require (copy.audio[0].size() == copy.audio[1].size(), "torn stereo snapshot"); } copying.store (false); });
+    while (copying.load()) run (256); reader.join();
+    p.loopFade = .02f; engine.requestLooperCommand (motefield::LooperCommand::stop); run (256);
+    require (engine.getLooperState() == motefield::LooperState::playing, "fade-out stopped abruptly");
+    run (1200); require (engine.getLooperState() == motefield::LooperState::stopped, "fade-out never stopped");
+    p.loopFade = 0; engine.requestLooperCommand (motefield::LooperCommand::burstStart); run (1000);
+    engine.requestLooperCommand (motefield::LooperCommand::burstEnd); run (10);
+    require (engine.snapshotLoop().audio[0].size() == 1000, "burst length is wrong");
+    engine.requestLooperCommand (motefield::LooperCommand::burstStart); run (500);
+    engine.requestLooperCommand (motefield::LooperCommand::burstEnd); run (10);
+    require (engine.snapshotLoop().audio[0].size() == 500, "new burst did not replace old phrase");
+    const auto history = engine.snapshotHistory (.01);
+    require (history.audio[0].size() == 480, "retrospective capture has wrong duration");
+    require (std::abs (history.audio[0].back() - l[9]) < 1.e-5f, "retrospective capture is not final output");
+    p.bypass = true; p.trails = true; p.freeze = true; run (4000);
+    require (engine.getLooperState() == motefield::LooperState::stopped, "trails bypass left the phrase running indefinitely");
+    engine.readVisualFrame (visual); require (! visual.held, "trails bypass did not release Hold");
+    p.bypass = p.trails = p.freeze = false;
+    engine.requestLooperCommand (motefield::LooperCommand::clear); run (256);
+    p.quantize = true; p.hostPpq = .25; engine.requestLooperCommand (motefield::LooperCommand::record); run (256);
+    engine.requestLooperCommand (motefield::LooperCommand::burstStart); run (256); engine.readVisualFrame (visual);
+    run (20000); require (engine.getLooperState() == motefield::LooperState::recording, "stale quantized command interrupted burst recording");
+    p.quantize = false;
+    // A changed sample rate resamples the stored phrase instead of discarding it.
+    engine.prepare (24000, 256, 2); require (engine.restoreLoop (saved), "sample-rate restore rejected");
+    run (256); require (engine.snapshotLoop().audio[0].size() == 12000, "loop was not resampled on restore");
+    std::cout << "Performance DSP: beat-accurate looping, snapshots/restore, concurrent snapshots, resampling, burst, fades, history and allocation-free processing passed.\n";
+}
+
+std::vector<float> renderMaterial (motefield::EngineParameters p)
+{
+    motefield::Engine engine; engine.prepare (sampleRate, 256, 2);
+    std::vector<float> result (96000), in (256), out (256), right (256), side (256);
+    for (int offset = 0; offset < 96000; offset += 256)
+    {
+        const auto count = std::min (256, 96000 - offset);
+        for (int i = 0; i < count; ++i) { in[i] = .3f * std::sin (twoPi * (offset + i) * 220.f / 48000.f); side[i] = ((offset + i) % 12000) < 1000 ? .8f : 0.f; }
+        const float* inputs[] { in.data(), in.data() }; float* outputs[] { out.data(), right.data() };
+        p.sidechain = side.data(); p.hostPositionValid = p.hostPlaying = true; p.hostPpq = offset / 24000.0;
+        engine.process (inputs, outputs, 2, count, p); std::copy_n (out.begin(), count, result.begin() + offset);
+    }
+    return result;
+}
+void testMaterialAndPatterns()
+{
+    motefield::EngineParameters p; p.mode = motefield::Mode::veil; p.mix = 1; p.space = 0; p.patternLock = true;
+    const auto base = renderMaterial (p);
+    require (base == renderMaterial (p), "seeded pattern does not repeat across renders");
+    const auto differs = [&] (const motefield::EngineParameters& changed, const char* message)
+    { const auto next = renderMaterial (changed); double distance = 0; for (std::size_t i = 0; i < base.size(); ++i) { require (std::isfinite (next[i]), "material produced non-finite audio"); distance += std::abs (base[i] - next[i]); } require (distance > 1.0, message); };
+    auto next = p; next.fieldPitch = 7; differs (next, "field pitch is cosmetic");
+    next = p; next.fieldPosition = .5f; differs (next, "field position is cosmetic");
+    next = p; next.fieldStretch = 2; differs (next, "stretch is cosmetic");
+    next = p; next.fieldSplit = 1; differs (next, "split does not add voices");
+    next = p; next.tension = 1; differs (next, "tension does not affect articulation");
+    next = p; next.cohesion = 0; differs (next, "cohesion does not affect sound");
+    next = p; next.fieldPitch = 7; next.viscosity = 1; const auto slow = renderMaterial (next); next.viscosity = 0; require (slow != renderMaterial (next), "viscosity does not change response time");
+    next = p; next.magnetAmount = 1; differs (next, "magnet sidechain does not compress audio");
+    next = p; next.rhythmMutation = 3; differs (next, "rhythm mutation has no effect");
+    next = p; next.pitchMutation = 3; differs (next, "pitch mutation has no effect");
+    next = p; next.scale = 2; differs (next, "scale does not constrain pitch");
+    next = p; next.looperOnly = true; differs (next, "looper-only path still granular");
+    std::cout << "Material DSP: audible gestures, viscosity/cohesion/tension, sidechain compression, reproducible patterns, independent mutations and scale constraints passed.\n";
+}
+
 } // namespace
 
-int main()
+int main (int argc, char**)
 {
+    testPerformanceFeatures();
+    testMaterialAndPatterns();
+    if (argc > 1) return 0;
     testAllModesAndVariations();
     testBlockSizeDeterminism();
     testFreeze();

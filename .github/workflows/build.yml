@@ -17,10 +17,14 @@ jobs:
         run: bash scripts/build-macos.sh
       - name: Package development installer
         run: bash scripts/package-macos.sh --unsigned
+      - name: Package direct-install test ZIP
+        run: bash scripts/package-friend-macos.sh
       - uses: actions/upload-artifact@v4
         with:
           name: MoteField-macOS-universal-UNSIGNED
-          path: dist/installers/*
+          path: |
+            dist/installers/*
+            dist/friend-test/*.zip
           if-no-files-found: error
 
   windows:

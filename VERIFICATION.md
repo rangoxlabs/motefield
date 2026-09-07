@@ -1,45 +1,51 @@
 # Verification
 
-## Version 0.2.6
+## Version 0.3.0
 
-macOS universal VST3, AU, and standalone targets compiled with Xcode 26.6. The VST3 and AU were installed locally, both reported 0.2.6, VST3 signature verification passed, and `auval -v aufx MtFd Rngo` succeeded.
+Universal macOS VST3, AU, standalone, and native editor harness builds completed. VST3 and AU are installed locally and report 0.3.0. The installed VST3 executable matches the staged binary by SHA-256. Previous installed copies were backed up before replacement.
 
-### DSP checks
+### DSP
 
-The suite passed in 32.33 seconds on the development Mac. Coverage includes:
+The full suite passed in 47.01 seconds on the development Mac. It covers:
 
-- All 11 modes and four variation selections, with finite, non-silent output under the test stimulus.
-- Buffer-size determinism and oversized buffer chunking.
-- Granular Hold and captured delay Hold.
-- Layered overdubbing, partial overdub removal, repeated undo, and ordered transport commands.
-- Output waveform telemetry compared with the actual host output, in mono/stereo at 48/96 kHz.
-- Visual frequency-band separation at 48/96 kHz, antiphase stereo energy, and decay after silence.
-- In-place mono bypass and no heap allocations in the instrumented oversized callback test.
+- All 11 modes and four variations, finite output, buffer-size determinism, oversized processing, mono bypass, and allocation-free engine callbacks.
+- Granular and delay Hold, layered overdubbing, partial-pass undo, repeated undo, and queued transport commands.
+- Exact quarter-note loop boundaries from a fractional host beat position, pending-command telemetry, burst replacement, and cancellation of a stale quantized command when Burst starts.
+- Phrase fade-out, release of Hold during trails bypass, and stopping a phrase while tails decay.
+- Loop snapshot/restore, concurrent snapshots during playback, sample-rate conversion, and capture of recent final output.
+- Audible scan/pitch/stretch/split gestures, viscosity response time, cohesion, tension, sidechain compression, reproducible random patterns, rhythm/pitch mutation, and scale constraints.
+- Output telemetry, independent frequency-band response, antiphase stereo energy, and silence decay.
 
-These checks do not establish an output limiter or a ceiling for every feedback and looper combination.
+The performance/material subset also passed with AddressSanitizer and UndefinedBehaviorSanitizer. Leak detection was disabled for that run. Concurrent snapshot tests are functional coverage, not a ThreadSanitizer result.
 
-### Native editor and processor checks
+### Processor and native editor
 
-- Compact initial window, Details sizing, and visible controls within the editor bounds.
-- All eleven mode-dial values, label/pointer alignment, and nonoverlapping label hit areas.
-- Whole-number percentage formatting and correct Save preset menu text.
-- All mode and variation selectors, synced/manual Time, Hold/Bypass, looper controls, and FX Reverse.
-- 32 factory presets covering all eleven modes; user-file save/load, overwrite protection, malformed-file rejection, and preset identity across session recall.
-- All 29 host parameters, complete UI gesture notifications, six looper triggers, held-trigger non-repetition, and suppression of transport commands during state recall.
-- Distinct bass/mid/treble material shapes, stability across short gaps between audio snapshots, and return to the resting surface after silence.
+- Fluid dragging and double-click reset send balanced host automation gestures. MIDI CC learn begins recording at the event's sample offset; releasing a transport CC does not retrigger it.
+- Stereo WAV export has the expected sample count and channel count.
+- Recorded phrase audio round-trips through DAW state and user preset files, including state restored before audio preparation.
+- The enabled mono sidechain bus reaches the magnet follower; retrospective capture replaces the phrase; malformed audio archives are rejected.
+- All 58 exposed parameters are automatable and UI changes provide host gesture notifications. Existing parameter IDs and stepped loop-speed choices are retained.
+- 32 factory presets cover all modes. User-preset tests cover overwrite protection, malformed-file rejection, preset identity, and sound-setting round trips.
+- Initial window dimensions, Details sizing, mode-pointer alignment, preset text, and whole-number knob percentages pass.
+- The Performance panel opens and closes within the editor, and screenshots of all three pages were inspected. Controls beyond the viewport are reached by scrolling.
+- Frequency-dependent material deformation, short snapshot-gap stability, and settling to the resting surface pass.
 
-Compiled editor, compact window, Details, and audio-driven material screenshots were inspected. The README image is a native render of the current interface.
+Apple's `auval -v aufx MtFd Rngo` succeeded, including parameter scheduling tests. It reports a warning that MIDI input is implemented on an `aufx` component rather than `aumf`. The original AU identity is intentionally retained for existing projects; use VST3 for host-routed MIDI where supported. Direct MIDI routing into this AU is not qualified in Logic.
 
-### Earlier checks
+### Private Mac test kit
 
-Linux x86_64 compiled an earlier preview. The DSP regression suite was also exercised under AddressSanitizer and UndefinedBehaviorSanitizer; leak detection was disabled in that environment. This is not a current Linux release qualification or a leak-check result.
+The ZIP contains the two universal plug-ins, `Install.command`, payload checksums, and plain-text instructions. Installation is per-user, with backup of older copies and no administrator password. The installer clears quarantine only on its staged MoteField bundles after file-integrity checks.
 
-## Remaining validation
+The 0.2.6 kit was extracted, marked with simulated browser quarantine, installed into an isolated test root, and reinstalled to exercise backup behavior. Installed bundle signatures verified and quarantine was absent from the installed copies. This is not a clean-machine test. The 0.3.0 kit separately passed quarantined installation, signature checks, and rejection of a deliberately modified payload before any destination files were written.
 
-- Native Windows compilation, installer upgrade/uninstall, and DAW scanning/playback.
-- Automation recording/playback and session recall in each supported DAW.
-- Clean-machine macOS installation and Intel-host execution.
-- Sustained rendering performance with multiple open plug-in instances.
-- Signed and notarized release packaging.
+## Platform and release limits
 
-The editor harness exercises component callbacks and parameter attachments; it does not replace hands-on host testing. Phrase-audio persistence and dedicated MIDI CC learn are not implemented.
+- The previous 0.2.6 GitHub Actions run passed on macOS and Windows. The expanded 0.3.0 Windows build and native DAW testing remain to be verified.
+- Live controller routing, automation recording/playback, MIDI preset changes, and external WAV dragging need hands-on checks in each supported DAW.
+- Continuous speed is varispeed: it changes pitch. Tempo changes after recording do not automatically time-stretch a phrase to the new tempo.
+- Scales constrain grain transposition using a manually supplied source note; this is not polyphonic pitch correction.
+- Snapshots taken during recording, overdubbing, or transport changes capture live material. Stop editing the phrase first when an exact finalized take is required.
+- High feedback and stacked loops can exceed full scale. There is no output limiter; 24-bit WAV export can clip audio above full scale.
+- Clean-machine macOS installation, Intel host execution, sustained multi-instance performance, and signed/notarized release packaging remain pending.
+
+The fluid is an interactive visual interpretation of the engine, not a physical magnetic-fluid simulation. Native editor checks exercise callbacks and attachments; they do not replace testing in a real DAW.

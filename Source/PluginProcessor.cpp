@@ -7,40 +7,83 @@
 MoteFieldAudioProcessor::MoteFieldAudioProcessor()
     : AudioProcessor (BusesProperties()
                           .withInput ("Input", juce::AudioChannelSet::stereo(), true)
+                          .withInput ("Magnet", juce::AudioChannelSet::mono(), false)
                           .withOutput ("Output", juce::AudioChannelSet::stereo(), true)),
       parameters (*this, nullptr, "MoteFieldState", createParameterLayout())
 {
     for (const auto* id : motefield::parameter::looperTriggers)
         parameters.addParameterListener (id, this);
+    clearMidiMappings();
+    for (auto* p : getParameters()) if (auto* ranged = dynamic_cast<juce::RangedAudioParameter*> (p)) midiTargets.push_back (ranged);
+    for (std::size_t i = 0; i < midiTargets.size(); ++i)
+    { if (midiTargets[i]->paramID == "freeze") midiMap[64].store (static_cast<int> (i));
+      if (midiTargets[i]->paramID == "modDepth") midiMap[1].store (static_cast<int> (i));
+      if (midiTargets[i]->paramID == "mix") midiMap[11].store (static_cast<int> (i)); }
+    startTimerHz (30);
 }
 
 MoteFieldAudioProcessor::~MoteFieldAudioProcessor()
 {
+    stopTimer();
     for (const auto* id : motefield::parameter::looperTriggers)
         parameters.removeParameterListener (id, this);
 }
 
 void MoteFieldAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 {
-    engine.prepare (sampleRate, samplesPerBlock, getTotalNumOutputChannels());
+    auto saved = loopData();
+    { std::lock_guard<std::mutex> lock (archiveMutex);
+      engine.prepare (sampleRate, samplesPerBlock, getTotalNumOutputChannels()); prepared = true; currentSampleRate = sampleRate; }
+    if (saved.getSize() > 0) restoreLoopData (saved);
     pendingLooperTriggers.store (0);
 }
 
 void MoteFieldAudioProcessor::releaseResources()
 {
-    engine.reset();
+    auto saved = loopData();
+    std::lock_guard<std::mutex> lock (archiveMutex);
+    pendingLoopData = saved; prepared = false;
 }
 
 bool MoteFieldAudioProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
 {
     const auto input = layouts.getMainInputChannelSet();
     const auto output = layouts.getMainOutputChannelSet();
-    if (input != output)
-        return false;
+    if (input != output) return false;
+    if (layouts.inputBuses.size() > 1 && ! layouts.inputBuses[1].isDisabled() && layouts.inputBuses[1] != juce::AudioChannelSet::mono()) return false;
     return input == juce::AudioChannelSet::mono() || input == juce::AudioChannelSet::stereo();
 }
 
-void MoteFieldAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer&)
+void MoteFieldAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi)
+{
+    int cursor = 0;
+    for (const auto metadata : midi)
+    {
+        const auto eventSample = juce::jlimit (cursor, buffer.getNumSamples(), metadata.samplePosition);
+        if (eventSample > cursor) processAudio (buffer, cursor, eventSample - cursor);
+        cursor = eventSample;
+        const auto message = metadata.getMessage();
+        if (message.isProgramChange()) requestedProgram.store (juce::jlimit (0, 31, message.getProgramChangeNumber()));
+        if (! message.isController()) continue;
+        const auto cc = message.getControllerNumber(), value = message.getControllerValue();
+        const auto learning = midiLearn.exchange (-1);
+        if (learning >= 0 && learning < static_cast<int> (midiTargets.size())) { midiMap[cc].store (learning); lastLearned.store (cc); }
+        const auto target = midiMap[cc].load();
+        if (target >= 0 && target < static_cast<int> (midiTargets.size()))
+        {
+            auto* parameter = midiTargets[static_cast<std::size_t> (target)];
+            bool trigger = false; for (const auto* id : motefield::parameter::looperTriggers) trigger = trigger || parameter->paramID == id;
+            const bool toggleHold = parameter->paramID == "freeze" && parameters.getRawParameterValue ("holdStyle")->load() < .5f;
+            if (trigger || toggleHold) { if (value >= 64 && previousCC[cc] < 64) parameter->setValueNotifyingHost (parameter->getValue() > .5f ? 0.f : 1.f); }
+            else parameter->setValueNotifyingHost (value / 127.f);
+        }
+        previousCC[cc] = value;
+    }
+    if (cursor < buffer.getNumSamples()) processAudio (buffer, cursor, buffer.getNumSamples() - cursor);
+    midi.clear();
+}
+
+void MoteFieldAudioProcessor::processAudio (juce::AudioBuffer<float>& buffer, int offset, int samples)
 {
     juce::ScopedNoDenormals noDenormals;
     // Both host automation and UI actions publish bounded, allocation-free flags.
@@ -52,11 +95,7 @@ void MoteFieldAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, ju
         motefield::LooperCommand::recordPlayDub, motefield::LooperCommand::stopPlay };
     for (std::size_t i = 0; i < actions.size(); ++i)
         if ((commands & (1u << i)) != 0) engine.requestLooperCommand (actions[i]);
-    const auto channels = juce::jlimit (1, 2, getTotalNumInputChannels());
-    const auto samples = buffer.getNumSamples();
-
-    for (auto channel = getTotalNumInputChannels(); channel < getTotalNumOutputChannels(); ++channel)
-        buffer.clear (channel, 0, samples);
+    const auto channels = juce::jlimit (1, 2, getMainBusNumInputChannels());
 
     const auto load = [this] (const char* id)
     {
@@ -92,27 +131,51 @@ void MoteFieldAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, ju
     values.looperBeforeEffect = load (motefield::parameter::looperOrder) > 0.5f;
     values.bypass = load (motefield::parameter::bypass) > 0.5f;
 
+    values.quantize = load ("loopQuantize") > .5f;
+    values.looperOnly = load ("loopOnly") > .5f; values.trails = load ("bypassTrails") > .5f;
+    values.loopFade = load ("loopFade"); values.fadeMode = static_cast<int> (load ("loopFadeMode"));
+    values.recordIntoDub = load ("loopRecordOrder") > .5f;
+    if (load ("loopContinuous") > .5f) values.looperSpeed = load ("loopRate");
+    const auto burst = load ("burstGate") > .5f;
+    if (burst != previousBurst) { engine.requestLooperCommand (burst ? motefield::LooperCommand::burstStart : motefield::LooperCommand::burstEnd); previousBurst = burst; }
+    values.viscosity = load ("viscosity"); values.cohesion = load ("cohesion"); values.tension = load ("tension");
+    values.fieldPosition = load ("fieldPosition"); values.fieldPitch = load ("fieldPitch");
+    values.fieldStretch = load ("fieldStretch"); values.fieldSplit = load ("fieldSplit");
+    values.magnetAmount = load ("magnetAmount"); values.magnetMode = static_cast<int> (load ("magnetMode"));
+    values.magnetAttack = load ("magnetAttack"); values.magnetRelease = load ("magnetRelease");
+    values.seed = static_cast<int> (load ("patternSeed")); values.patternLock = load ("patternLock") > .5f;
+    values.patternSteps = static_cast<int> (load ("patternSteps"));
+    values.rhythmMutation = static_cast<int> (load ("rhythmMutation")); values.pitchMutation = static_cast<int> (load ("pitchMutation"));
+    values.scale = static_cast<int> (load ("scale")); values.root = static_cast<int> (load ("scaleRoot")); values.sourceNote = static_cast<int> (load ("sourceNote"));
+    if (getBusCount (true) > 1 && getBus (true, 1)->isEnabled())
+    { auto side = getBusBuffer (buffer, true, 1); if (side.getNumChannels() > 0) values.sidechain = side.getReadPointer (0) + offset; }
     bool hostTempoFound = false;
     if (load (motefield::parameter::sync) > 0.5f)
     {
         if (auto* hostPlayHead = getPlayHead())
             if (const auto position = hostPlayHead->getPosition())
+            {
+                if (const auto ppq = position->getPpqPosition()) { values.hostPpq = *ppq; values.hostPositionValid = true; }
+                values.hostPlaying = position->getIsPlaying();
+                if (const auto signature = position->getTimeSignature()) beatsPerBar.store (signature->numerator * 4.0 / signature->denominator);
                 if (const auto hostBpm = position->getBpm())
                 {
                     values.bpm = *hostBpm;
                     hostTempoFound = true;
                 }
+            }
     }
+    values.hostPpq += offset / (currentSampleRate * 60.0 / values.bpm);
     receivingHostTempo.store (hostTempoFound, std::memory_order_relaxed);
     effectiveBpm.store (values.bpm, std::memory_order_relaxed);
 
     std::array<const float*, 2> inputs {
-        buffer.getReadPointer (0),
-        channels > 1 ? buffer.getReadPointer (1) : buffer.getReadPointer (0)
+        buffer.getReadPointer (0) + offset,
+        (channels > 1 ? buffer.getReadPointer (1) : buffer.getReadPointer (0)) + offset
     };
     std::array<float*, 2> outputs {
-        buffer.getWritePointer (0),
-        channels > 1 ? buffer.getWritePointer (1) : buffer.getWritePointer (0)
+        buffer.getWritePointer (0) + offset,
+        (channels > 1 ? buffer.getWritePointer (1) : buffer.getWritePointer (0)) + offset
     };
     engine.process (inputs.data(), outputs.data(), channels, samples, values);
 }
@@ -125,14 +188,33 @@ juce::AudioProcessorEditor* MoteFieldAudioProcessor::createEditor()
 void MoteFieldAudioProcessor::getStateInformation (juce::MemoryBlock& destinationData)
 {
     if (const auto xml = parameters.copyState().createXml())
+    {
+        auto* audio = xml->createNewChildElement ("LoopAudio"); audio->addTextElement (loopData().toBase64Encoding());
+        auto* mappings = xml->createNewChildElement ("MidiMappings");
+        for (std::size_t cc = 0; cc < midiMap.size(); ++cc) if (midiMap[cc].load() >= 0)
+        { auto* map = mappings->createNewChildElement ("CC"); map->setAttribute ("cc", static_cast<int> (cc)); map->setAttribute ("target", midiTargets[static_cast<std::size_t> (midiMap[cc].load())]->paramID); }
         copyXmlToBinary (*xml, destinationData);
+    }
 }
 
 void MoteFieldAudioProcessor::setStateInformation (const void* data, int sizeInBytes)
 {
     if (const auto xml = getXmlFromBinary (data, sizeInBytes))
     {
-        const auto restored = juce::ValueTree::fromXml (*xml);
+        if (! xml->hasTagName (parameters.state.getType().toString())) return;
+        if (auto* audio = xml->getChildByName ("LoopAudio"))
+        { juce::MemoryBlock bytes; if (! bytes.fromBase64Encoding (audio->getAllSubText()) || ! restoreLoopData (bytes)) return; xml->removeChildElement (audio, true); }
+        if (auto* mappings = xml->getChildByName ("MidiMappings"))
+        { clearMidiMappings(); for (const auto* map : mappings->getChildIterator())
+            for (std::size_t i = 0; i < midiTargets.size(); ++i) if (midiTargets[i]->paramID == map->getStringAttribute ("target"))
+            { const auto cc = map->getIntAttribute ("cc", -1); if (cc >= 0 && cc < 128) midiMap[static_cast<std::size_t> (cc)].store (static_cast<int> (i)); }
+          xml->removeChildElement (mappings, true); }
+        auto restored = juce::ValueTree::fromXml (*xml);
+        for (const auto& id : extendedParameterIds())
+        {
+            bool found = false; for (const auto child : restored) found = found || child.getProperty ("id").toString() == id;
+            if (! found) { juce::ValueTree child ("PARAM"); child.setProperty ("id", id, nullptr); auto* p = parameters.getParameter (id); child.setProperty ("value", p->convertFrom0to1 (p->getDefaultValue()), nullptr); restored.addChild (child, -1, nullptr); }
+        }
         if (restored.isValid() && restored.hasType (parameters.state.getType()))
         {
             restoringState.store (true);
@@ -144,7 +226,8 @@ void MoteFieldAudioProcessor::setStateInformation (const void* data, int sizeInB
             if (! hasBypass)
                 parameters.getParameter (motefield::parameter::bypass)->setValueNotifyingHost (0.0f);
             parameters.replaceState (restored);
-            pendingLooperTriggers.store (0);
+            pendingLooperTriggers.store (0); requestedProgram.store (-1);
+            previousBurst = parameters.getRawParameterValue ("burstGate")->load() > .5f;
             restoringState.store (false);
         }
     }
@@ -288,6 +371,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout MoteFieldAudioProcessor::cre
         layout.add (std::make_unique<juce::AudioParameterBool> (
             ParameterID { motefield::parameter::looperTriggers[i], 3 }, names[i], false));
 
+    addPerformanceParameters (layout);
     return layout;
 }
 
@@ -354,6 +438,7 @@ void MoteFieldAudioProcessor::applyFactoryPreset (int index)
         {10, 3, .86f, .69f, .37f, 12600.f, .57f, .46f, .27f, 5, 0}
     }};
     index = juce::jlimit (0, static_cast<int> (presets.size()) - 1, index);
+    currentProgram.store (index);
     const auto& preset = presets[static_cast<std::size_t> (index)];
     setParameterValue (mode, static_cast<float> (preset.modeIndex));
     setParameterValue (variation, static_cast<float> (preset.variant));

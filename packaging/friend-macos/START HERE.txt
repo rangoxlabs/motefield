@@ -1,0 +1,75 @@
+MOTEFIELD BY RANGO LABS - MAC TEST BUILD @VERSION@
+
+VST3 and Audio Unit plug-ins for Intel and Apple Silicon Macs, macOS 11+.
+A DAW supporting VST3 or Audio Units is required. This is not a Windows build.
+
+INSTALL - NO APPLE NOTARIZATION OR ADMIN PASSWORD NEEDED
+
+1. Download the ZIP and double-click to extract the entire folder. Keep
+   Install.command, SHA256SUMS.txt and the Plug-ins folder together.
+2. Save your work and fully quit your DAW.
+3. Open Terminal (Applications > Utilities > Terminal).
+4. Type the word bash followed by a space. Do not press Return yet.
+5. Drag Install.command from the extracted folder into the Terminal window.
+   This fills in the correct file path. Now press Return.
+   The result will look similar to:
+
+   bash /Users/yourname/Downloads/MoteField-@VERSION@-Mac-Test/Install.command
+
+   Use drag-and-drop so you do not have to edit the example path.
+   Double-clicking Install.command may itself trigger Apple's warning;
+   use Terminal as described above.
+6. The script checks the files and asks if your DAW is closed. Type y and
+   press Return. Wait for "Installed successfully".
+7. Reopen your DAW and find MoteField under Rango Labs.
+   Ableton Live: Settings > Plug-Ins, enable VST3 system folders, then Rescan.
+   If previously rejected, hold Option while clicking Rescan.
+   Logic Pro: Audio FX > Audio Units > Rango Labs. If absent, open Plug-in
+   Manager, select MoteField, then Reset & Rescan Selection.
+8. Load MoteField on an audio track. Start with First Light, play audio,
+   raise Mix, then try other modes and Hold.
+
+ABOUT THE SECURITY STEP
+
+This private build has a local code signature but no Apple Developer ID
+signature or notarization yet. Only run it if received directly from
+Rango Labs or the developer you trust. The script removes the download
+quarantine attribute only from the two plug-in copies it installs. It does
+not turn off Gatekeeper, change global security settings, or use sudo.
+
+WHERE IT INSTALLS
+
+~/Library/Audio/Plug-Ins/VST3/MoteField.vst3
+~/Library/Audio/Plug-Ins/Components/MoteField.component
+
+~ means your home folder. Use Finder > Go > Go to Folder to open these paths.
+Previous user-installed copies are backed up under:
+~/Library/Application Support/Rango Labs/MoteField/Backups/
+
+TROUBLESHOOTING
+
+- Restart your DAW and rescan after installing. Do not double-click the VST3
+  bundle: it loads inside the DAW, not as a separate application.
+- If an earlier package installed another copy under /Library/Audio/Plug-Ins
+  (without ~), your DAW may scan that copy too. Tell Rango Labs before removing
+  it so we can identify which version is actually being loaded.
+- A checksum/signature FAILED message means stop and download a fresh ZIP.
+  Do not continue with modified or incomplete plug-in files.
+- If Terminal was denied access to Downloads, allow access when macOS asks
+  and retry. This can appear as "Operation not permitted".
+- A work/school-managed Mac may prohibit unnotarized software. This kit does
+  not override an administrator's policy.
+- If another error appears, send Rango Labs its exact text, your macOS
+  version, DAW name/version, and whether your Mac is Intel or Apple Silicon.
+
+REMOVE OR RESTORE AN EARLIER VERSION
+
+Quit your DAW. Move only the two installed MoteField bundles above to Trash.
+To restore an older version, copy its matching backed-up bundles into those
+folders. Reopen your DAW and rescan. Leave other plug-ins alone.
+
+THIS TEST BUILD
+
+This kit contains version @VERSION@. If using 0.2.6, phrase audio does not
+save with projects:
+record/render useful performances before closing your session.

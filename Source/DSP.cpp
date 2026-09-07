@@ -7,6 +7,7 @@
 #include <limits>
 #include <numeric>
 #include <vector>
+#include <mutex>
 
 namespace motefield
 {
@@ -52,6 +53,7 @@ class Random
 {
 public:
     void reset() noexcept { state = 0x7139a52du; }
+    void seed (std::uint32_t value) noexcept { state = value == 0 ? 1 : value; }
 
     std::uint32_t nextU32() noexcept
     {
@@ -143,6 +145,7 @@ struct Grain
     float gain = 1.0f;
     float pan = 0.0f;
     float envelopePower = 1.0f;
+    float readSpan = 96000.f, tone = 1.f, filterStateL = 0.f, filterStateR = 0.f;
 
     void start (double newDelay,
                 double startRate,
@@ -161,11 +164,12 @@ struct Grain
         pan = clamp (newPan, -1.0f, 1.0f);
         envelopePower = shapeEnvelopePower (contour);
         age = 0.0f;
-        level = 0.0f;
+        level = 0.0f; filterStateL = filterStateR = 0.f;
     }
 
     void process (const StereoRing& ring,
                   bool captureHeadIsMoving,
+                  const EngineParameters& material,
                   float& left,
                   float& right) noexcept
     {
@@ -180,19 +184,22 @@ struct Grain
         }
 
         const auto hann = std::sin (pi * clamp (phase, 0.0f, 1.0f));
-        const auto envelope = std::pow (std::max (hann, 0.0f), envelopePower) * gain;
-        const auto panAngle = (pan + 1.0f) * pi * 0.25f;
+        const auto envelope = std::pow (std::max (hann, 0.0f), clamp (envelopePower + (material.tension - .5f) * 3.f, .2f, 6.f)) * gain;
+        const auto panAngle = (clamp (pan * (1.5f - material.cohesion), -1.f, 1.f) + 1.0f) * pi * 0.25f;
         const auto gainL = std::cos (panAngle) * 1.41421356f;
         const auto gainR = std::sin (panAngle) * 1.41421356f;
-        const auto sampleL = ring.read (0, delay) * envelope * gainL;
-        const auto sampleR = ring.read (1, delay) * envelope * gainR;
+        const auto offset = material.fieldPosition * std::min (static_cast<float> (ring.available()) * .35f, readSpan);
+        filterStateL += tone * (ring.read (0, delay + offset) - filterStateL);
+        filterStateR += tone * (ring.read (1, delay + offset) - filterStateR);
+        const auto sampleL = filterStateL * envelope * gainL;
+        const auto sampleR = filterStateR * envelope * gainR;
         left += sampleL;
         right += sampleR;
         level = std::max ({ std::abs (sampleL), std::abs (sampleR), level * 0.9995f });
 
-        age += 1.0f;
-        rate += rateDelta;
-        delay += (captureHeadIsMoving ? 1.0 : 0.0) - rate;
+        age += 1.0f / clamp (material.fieldStretch, .25f, 4.f);
+        rate += rateDelta / clamp (material.fieldStretch, .25f, 4.f);
+        delay += (captureHeadIsMoving ? 1.0 : 0.0) - rate * std::pow (2.0, material.fieldPitch / 12.0);
     }
 };
 
@@ -304,7 +311,7 @@ public:
         wasHeld = false;
         holdPosition = 0.0;
         sampleClock = 0;
-        tapLevels.fill (0.0f);
+        tapLevels.fill (0.0f); pitchPhases.fill (0.0); tapLow = {}; tapUpper = {};
         heldLevel = 0.0f;
         feedbackL = feedbackR = 0.0f;
         smearStateL = smearStateR = 0.0f;
@@ -318,11 +325,11 @@ public:
                   float& outputR) noexcept
     {
         const auto quarter = sampleRate * 60.0 / clamp (parameters.bpm, 30.0, 300.0);
-        const auto baseDelay = clamp (quarter * divisionFactor (parameters.division),
+        const auto baseDelay = clamp (quarter * divisionFactor (parameters.division) * parameters.fieldStretch,
                                       24.0,
                                       static_cast<double> (ring.capacity() - 64));
         const auto variation = clamp (parameters.variation, 0, 3);
-        const auto tapCount = clamp (1 + static_cast<int> (parameters.density * 5.99f), 1, 6);
+        const auto tapCount = clamp (1 + static_cast<int> (parameters.density * 5.99f + parameters.fieldSplit * 4.f), 1, 6);
 
         if (parameters.freeze)
         {
@@ -370,12 +377,36 @@ public:
         for (int tap = 0; tap < tapCount; ++tap)
         {
             const auto pan = tapCount == 1 ? 0.0f
-                                           : (static_cast<float> (tap) / static_cast<float> (tapCount - 1)) * 2.0f - 1.0f;
+                                           : ((static_cast<float> (tap) / static_cast<float> (tapCount - 1)) * 2.0f - 1.0f) * (1.5f - parameters.cohesion);
             const auto delay = baseDelay * patterns[static_cast<std::size_t> (variation)][static_cast<std::size_t> (tap)]
-                               * (1.0 + modulation * (tap + 1));
+                               * (1.0 + modulation * (tap + 1)) * (parameters.rhythmMutation != 0 ? .5 + .25 * ((tap + parameters.rhythmMutation) % 7) : 1.0);
             const auto weight = 1.0f / std::sqrt (static_cast<float> (tap + 1));
-            const auto sampleL = ring.read (0, delay);
-            const auto sampleR = ring.read (1, delay * (1.0 + 0.003 * pan));
+            const auto ti = static_cast<std::size_t> (tap);
+            const auto semitones = parameters.fieldPitch + (parameters.pitchMutation != 0 ? static_cast<float> (((parameters.pitchMutation * 3 + tap * 2) % 5) * 3 - 6) : 0.f) + (isSmear && variation == 2 ? 12.f : 0.f);
+            const auto window = sampleRate * .08;
+            auto& pitchPhase = pitchPhases[ti];
+            pitchPhase = wrapPosition (pitchPhase + (1.0 - std::pow (2.0, semitones / 12.0)) / window, 1.0);
+            const auto readTap = [&] (int channel, double tapDelay)
+            {
+                tapDelay += parameters.fieldPosition * sampleRate * 2.0;
+                if (std::abs (semitones) < .001f) return ring.read (channel, tapDelay);
+                const auto second = std::fmod (pitchPhase + .5, 1.0);
+                const auto weight = static_cast<float> (std::pow (std::sin (pi * pitchPhase), 2.0));
+                return ring.read (channel, tapDelay + pitchPhase * window) * weight + ring.read (channel, tapDelay + second * window) * (1.f - weight);
+            };
+            auto sampleL = readTap (0, delay), sampleR = readTap (1, delay * (1.0 + .003 * pan));
+            if (isSmear || std::abs (parameters.tension - .5f) > .001f)
+            {
+                const auto sweep = .5f + .5f * std::sin (static_cast<float> (lfoPhase) * (tap + 1) + tap);
+                const auto coefficient = clamp (.03f + (1.f - parameters.shape) * .25f + sweep * .15f + (.5f - parameters.tension) * .2f, .005f, .9f);
+                for (int c = 0; c < 2; ++c)
+                {
+                    auto& signal = c == 0 ? sampleL : sampleR;
+                    tapLow[c][ti] += coefficient * (signal - tapLow[c][ti]);
+                    tapUpper[c][ti] += coefficient * .2f * (signal - tapUpper[c][ti]);
+                    signal = isSmear && variation == 1 ? (tapLow[c][ti] - tapUpper[c][ti]) * 1.4f : tapLow[c][ti];
+                }
+            }
             tapDelays[static_cast<std::size_t> (tap)] = delay;
             tapLevels[static_cast<std::size_t> (tap)] = std::max ({ std::abs (sampleL * weight), std::abs (sampleR * weight),
                 tapLevels[static_cast<std::size_t> (tap)] * 0.9995f });
@@ -462,6 +493,8 @@ private:
     double holdLength = 0.0, holdPosition = 0.0;
     float heldLevel = 0.0f;
     bool wasHeld = false;
+    std::array<double, 6> pitchPhases {};
+    std::array<std::array<float, 6>, 2> tapLow {}, tapUpper {};
     double sampleRate = 44100.0;
     double lfoPhase = 0.0;
     float feedbackL = 0.0f;
@@ -689,293 +722,226 @@ private:
 
 class PhraseLooper
 {
-public:
-    void prepare (double newSampleRate)
+    struct Storage
     {
-        const auto maximumLength = std::max (64, static_cast<int> (std::ceil (newSampleRate * 60.0)));
-        sampleRate = newSampleRate;
-        for (auto& channel : base)
-            channel.assign (static_cast<std::size_t> (maximumLength), 0.0f);
-        for (auto& channel : overdub)
-            channel.assign (static_cast<std::size_t> (maximumLength), 0.0f);
-        overdubStamp.assign (static_cast<std::size_t> (maximumLength), 0u);
+        explicit Storage (int n) : capacity (n)
+        {
+            for (auto& c : base) c = std::make_unique<std::atomic<float>[]> (static_cast<std::size_t> (n));
+            for (auto& c : overdub) c = std::make_unique<std::atomic<float>[]> (static_cast<std::size_t> (n));
+            stamps = std::make_unique<std::atomic<std::uint64_t>[]> (static_cast<std::size_t> (n));
+            for (int i = 0; i < n; ++i) { stamps[i] = 0; for (int c = 0; c < 2; ++c) { base[c][i] = 0; overdub[c][i] = 0; } }
+            for (auto& flag : layers) flag.store (false);
+            layers[1] = true;
+        }
+        float read (int c, int i) const noexcept
+        {
+            for (;;)
+            {
+                const auto revision = stamps[i].load (std::memory_order_acquire);
+                if ((revision & 0x10000u) != 0) continue;
+                const auto stamp = static_cast<unsigned> (revision & 65535u);
+                const auto value = base[c][i].load (std::memory_order_relaxed)
+                    + (stamp != 0 && layers[stamp].load (std::memory_order_relaxed) ? overdub[c][i].load (std::memory_order_relaxed) : 0.f);
+                if (stamps[i].load (std::memory_order_acquire) == revision) return value;
+            }
+        }
+        std::array<std::unique_ptr<std::atomic<float>[]>, 2> base, overdub;
+        std::unique_ptr<std::atomic<std::uint64_t>[]> stamps;
+        std::array<std::atomic<bool>, 65536> layers;
+        int capacity;
+        std::atomic<int> length { 0 };
+        bool resume = false;
+    };
+public:
+    void prepare (double rate)
+    {
+        std::lock_guard<std::mutex> lock (archiveMutex);
+        sampleRate = rate;
+        slots[0] = std::make_unique<Storage> (static_cast<int> (std::ceil (rate * 60.0)));
+        slots[1].reset(); slots[2].reset(); active.store (0); pendingSlot.store (-1); reader.store (-1);
         reset();
     }
-
-    void reset()
+    void reset() noexcept
     {
-        for (auto& channel : base) std::fill (channel.begin(), channel.end(), 0.0f);
-        for (auto& channel : overdub) std::fill (channel.begin(), channel.end(), 0.0f);
-        std::fill (overdubStamp.begin(), overdubStamp.end(), 0u);
-        length = 0;
-        recordPosition = 0;
-        playPosition = 0.0;
-        generation = 1u;
-        layerEnabled.fill (false);
-        layerEnabled[1] = true;
-        canUndo = false;
-        commandRead.store (0);
-        commandWrite.store (0);
-        state.store (static_cast<int> (LooperState::empty));
-        progress.store (0.0f);
+        if (slots[active.load()]) slots[active.load()]->length.store (0);
+        position = 0; recordPosition = 0; generation = 1; canUndo = false;
+        state.store (static_cast<int> (LooperState::empty)); progress.store (0);
+        commandRead.store (0); commandWrite.store (0); pendingCommand = LooperCommand::none;
+        pending.store (false); internalBeat = 0; fadeGain = 0; lastBeat = -1; speedSmooth = 1;
     }
-
+    void beginBlock() noexcept
+    {
+        const auto next = pendingSlot.load (std::memory_order_acquire);
+        if (next >= 0)
+        {
+            active.store (next, std::memory_order_release);
+            position = 0; recordPosition = 0; generation = 1; canUndo = false; fadeGain = 0;
+            const auto& storage = *slots[next];
+            state.store (static_cast<int> (storage.length.load() > 1 ? (storage.resume ? LooperState::playing : LooperState::stopped) : LooperState::empty));
+            pendingCommand = LooperCommand::none; pending.store (false); progress.store (0);
+            pendingSlot.store (-1, std::memory_order_release);
+        }
+    }
+    AudioSnapshot snapshot()
+    {
+        std::lock_guard<std::mutex> lock (archiveMutex);
+        int slot;
+        do { slot = pendingSlot.load (std::memory_order_acquire); if (slot < 0) slot = active.load (std::memory_order_acquire); reader.store (slot, std::memory_order_release); }
+        while (slot != active.load (std::memory_order_acquire) && slot != pendingSlot.load (std::memory_order_acquire));
+        AudioSnapshot result; result.sampleRate = sampleRate;
+        const auto* data = slots[slot].get();
+        if (data != nullptr)
+        {
+            const auto length = data->length.load (std::memory_order_acquire);
+            for (auto& c : result.audio) c.resize (static_cast<std::size_t> (length));
+            for (int i = 0; i < length; ++i) for (int c = 0; c < 2; ++c) result.audio[c][i] = data->read (c, i);
+            const auto st = currentState(); result.playing = slot == pendingSlot.load() ? data->resume : st == LooperState::playing || st == LooperState::overdubbing || st == LooperState::recording;
+        }
+        reader.store (-1, std::memory_order_release); return result;
+    }
+    bool restore (const AudioSnapshot& audio)
+    {
+        std::lock_guard<std::mutex> lock (archiveMutex);
+        if (pendingSlot.load (std::memory_order_acquire) >= 0 || audio.sampleRate <= 0 || audio.audio[0].size() != audio.audio[1].size()) return false;
+        int target = 0;
+        while (target == active.load (std::memory_order_acquire) || target == reader.load()) ++target;
+        if (target >= 3) return false;
+        auto storage = std::make_unique<Storage> (static_cast<int> (std::ceil (sampleRate * 60.0)));
+        const auto count = std::min (storage->capacity, static_cast<int> (audio.audio[0].size() * sampleRate / audio.sampleRate));
+        for (int i = 0; i < count; ++i)
+        {
+            const auto source = i * audio.sampleRate / sampleRate;
+            const auto a = std::min (static_cast<std::size_t> (source), audio.audio[0].size() - 1);
+            const auto b = std::min (a + 1, audio.audio[0].size() - 1);
+            for (int c = 0; c < 2; ++c) storage->base[c][i].store (lerp (audio.audio[c][a], audio.audio[c][b], static_cast<float> (source - a)));
+        }
+        storage->length.store (count); storage->resume = audio.playing;
+        slots[target] = std::move (storage);
+        pendingSlot.store (target, std::memory_order_release); return true;
+    }
     void request (LooperCommand command) noexcept
     {
-        const auto write = commandWrite.load (std::memory_order_relaxed);
-        const auto next = (write + 1u) % commands.size();
+        const auto write = commandWrite.load (std::memory_order_relaxed), next = (write + 1u) % commands.size();
         if (next == commandRead.load (std::memory_order_acquire)) return;
-        commands[write] = command;
-        commandWrite.store (next, std::memory_order_release);
+        commands[write] = command; commandWrite.store (next, std::memory_order_release);
     }
-
-    LooperState currentState() const noexcept
-    {
-        return static_cast<LooperState> (state.load (std::memory_order_acquire));
-    }
-
-    float currentProgress() const noexcept
-    {
-        return progress.load (std::memory_order_relaxed);
-    }
-
+    LooperState currentState() const noexcept { return static_cast<LooperState> (state.load()); }
+    float currentProgress() const noexcept { return progress.load(); }
     void copyVisual (VisualFrame& frame) const noexcept
     {
-        frame.loopState = currentState();
-        frame.loopSeconds = static_cast<float> (length / sampleRate);
-        frame.loopProgress = currentProgress();
-        frame.canUndo = canUndo;
-        // Bounded sampling of real recorded samples, including visible overdubs.
-        // This is a waveform overview, not a measurement of every peak.
+        const auto& data = *slots[active.load()]; const auto length = data.length.load();
+        frame.loopState = currentState(); frame.loopSeconds = static_cast<float> (length / sampleRate);
+        frame.loopProgress = currentProgress(); frame.canUndo = canUndo; frame.loopPending = pending.load();
         if (length < 2) return;
         for (std::size_t bin = 0; bin < frame.loopWaveform.size(); ++bin)
-        {
-            auto peak = 0.0f;
             for (int point = 0; point < 16; ++point)
             {
-                const auto position = (static_cast<double> (bin) + static_cast<double> (point) / 16.0)
-                                      * length / static_cast<double> (frame.loopWaveform.size());
-                peak = std::max ({ peak, std::abs (readLoop (0, position)), std::abs (readLoop (1, position)) });
+                const auto i = std::min (length - 1, static_cast<int> ((bin + point / 16.0) * length / frame.loopWaveform.size()));
+                frame.loopWaveform[bin] = std::max ({ frame.loopWaveform[bin], std::abs (data.read (0, i)), std::abs (data.read (1, i)) });
             }
-            frame.loopWaveform[bin] = peak;
-        }
     }
-
-    void process (float liveL,
-                  float liveR,
-                  float level,
-                  bool reverse,
-                  float speed,
-                  float& outputL,
-                  float& outputR) noexcept
+    void process (float liveL, float liveR, const EngineParameters& p, int sample, float& outL, float& outR) noexcept
     {
-        handlePendingCommand();
-        auto current = currentState();
-        outputL = liveL;
-        outputR = liveR;
-
-        if (current == LooperState::recording)
+        auto& data = *slots[active.load (std::memory_order_relaxed)];
+        const auto quarter = sampleRate * 60.0 / clamp (p.bpm, 30.0, 300.0);
+        const auto beat = p.hostPositionValid && p.hostPlaying ? p.hostPpq + sample / quarter : internalBeat;
+        internalBeat += 1.0 / quarter;
+        auto read = commandRead.load (std::memory_order_relaxed);
+        if (read != commandWrite.load (std::memory_order_acquire))
         {
-            if (recordPosition < static_cast<int> (base[0].size()))
-            {
-                base[0][static_cast<std::size_t> (recordPosition)] = liveL;
-                base[1][static_cast<std::size_t> (recordPosition)] = liveR;
-                overdubStamp[static_cast<std::size_t> (recordPosition)] = 0;
-                ++recordPosition;
-                length = recordPosition;
-                progress.store (static_cast<float> (recordPosition) / static_cast<float> (base[0].size()),
-                                std::memory_order_relaxed);
-            }
-            if (recordPosition >= static_cast<int> (base[0].size()))
-                finishRecording (false);
-            return;
+            const auto cmd = commands[read]; commandRead.store ((read + 1) % commands.size(), std::memory_order_release);
+            const auto immediate = cmd == LooperCommand::clear || cmd == LooperCommand::undo || cmd == LooperCommand::burstStart || cmd == LooperCommand::burstEnd;
+            if (p.quantize && ! immediate) { pendingCommand = cmd; targetBeat = std::ceil (beat - 1.e-7); pending.store (true); }
+            else { if (cmd != LooperCommand::undo) pending.store (false); execute (cmd, p, beat); }
         }
-
-        if ((current == LooperState::playing || current == LooperState::overdubbing) && length > 1)
+        // Rebase an armed command after a host seek so it never waits for an obsolete timeline position.
+        if (lastBeat >= 0 && std::abs (beat - lastBeat - 1.0 / quarter) > .05 && pending.load()) targetBeat = std::ceil (beat - 1.e-7);
+        if (pending.load() && beat + 1.e-7 >= targetBeat) { execute (pendingCommand, p, beat); pending.store (false); }
+        auto st = currentState();
+        outL = liveL; outR = liveR;
+        if (st == LooperState::recording)
         {
-            const auto loopL = readLoop (0, playPosition);
-            const auto loopR = readLoop (1, playPosition);
-            outputL += loopL * level;
-            outputR += loopR * level;
-
-            if (current == LooperState::overdubbing)
+            if (recordPosition < data.capacity)
             {
-                const auto writePosition = clamp (static_cast<int> (std::llround (playPosition)), 0, length - 1);
-                auto& stamp = overdubStamp[static_cast<std::size_t> (writePosition)];
+                const auto tag = data.stamps[recordPosition].load(); data.stamps[recordPosition].store (tag + 0x10000u);
+                data.base[0][recordPosition].store (liveL); data.base[1][recordPosition].store (liveR);
+                data.stamps[recordPosition].store ((tag + 0x20000u) & ~std::uint64_t (65535), std::memory_order_release);
+                ++recordPosition; data.length.store (recordPosition, std::memory_order_release);
+                progress.store (static_cast<float> (recordPosition) / data.capacity);
+            }
+            if (recordPosition >= data.capacity) finish (false, p);
+        }
+        else if ((st == LooperState::playing || st == LooperState::overdubbing || stopping) && data.length.load() > 1)
+        {
+            const auto length = data.length.load();
+            if (p.quantize && p.hostPositionValid && p.hostPlaying && lastBeat >= 0 && std::abs (beat - lastBeat - 1.0 / quarter) > .05)
+                position = wrapPosition ((beat - originBeat) * quarter * p.looperSpeed, length);
+            const bool fadeIn = p.fadeMode != 2, fadeOut = p.fadeMode != 1;
+            const auto fadeStep = p.loopFade > .001f ? 1.f / (p.loopFade * static_cast<float> (sampleRate)) : 1.f;
+            fadeGain = stopping ? std::max (0.f, fadeGain - (fadeOut ? fadeStep : 1.f)) : std::min (1.f, fadeGain + (fadeIn ? fadeStep : 1.f));
+            const auto a = static_cast<int> (position), b = (a + 1) % length; const auto t = static_cast<float> (position - a);
+            const auto edge = 1.f;
+            outL += lerp (data.read (0, a), data.read (0, b), t) * p.looperLevel * fadeGain * edge;
+            outR += lerp (data.read (1, a), data.read (1, b), t) * p.looperLevel * fadeGain * edge;
+            if (st == LooperState::overdubbing)
+            {
+                const auto i = clamp (static_cast<int> (std::llround (position)), 0, length - 1);
+                const auto tag = data.stamps[i].load(); const auto stamp = static_cast<unsigned> (tag & 65535u);
+                data.stamps[i].store (tag + 0x10000u);
                 if (stamp != generation)
                 {
-                    // Commit the previous audible layer only when this sample is touched.
-                    // Untouched samples continue to play that layer. No whole-loop copy on RT.
-                    if (stamp != 0u && layerEnabled[stamp])
-                        for (std::size_t channel = 0; channel < 2; ++channel)
-                            base[channel][static_cast<std::size_t> (writePosition)] += overdub[channel][static_cast<std::size_t> (writePosition)];
-                    overdub[0][static_cast<std::size_t> (writePosition)] = liveL;
-                    overdub[1][static_cast<std::size_t> (writePosition)] = liveR;
-                    stamp = generation;
+                    if (stamp != 0 && data.layers[stamp].load()) for (int c = 0; c < 2; ++c) data.base[c][i].store (data.base[c][i].load() + data.overdub[c][i].load());
+                    data.overdub[0][i].store (liveL); data.overdub[1][i].store (liveR);
                 }
-                else
-                {
-                    overdub[0][static_cast<std::size_t> (writePosition)] = saturate (
-                        overdub[0][static_cast<std::size_t> (writePosition)] + liveL);
-                    overdub[1][static_cast<std::size_t> (writePosition)] = saturate (
-                        overdub[1][static_cast<std::size_t> (writePosition)] + liveR);
-                }
+                else { data.overdub[0][i].store (saturate (data.overdub[0][i].load() + liveL)); data.overdub[1][i].store (saturate (data.overdub[1][i].load() + liveR)); }
+                data.stamps[i].store (((tag + 0x20000u) & ~std::uint64_t (65535)) | generation, std::memory_order_release);
                 canUndo = true;
             }
-
-            const auto direction = reverse ? -1.0 : 1.0;
-            playPosition = wrapPosition (playPosition + direction * clamp (static_cast<double> (speed), 0.25, 4.0),
-                                         static_cast<double> (length));
-            progress.store (static_cast<float> (playPosition / static_cast<double> (length)),
-                            std::memory_order_relaxed);
+            speedSmooth += (1.f - std::exp (-1.f / static_cast<float> (sampleRate * .01))) * (p.looperSpeed - speedSmooth);
+            position = wrapPosition (position + (p.looperReverse ? -1 : 1) * speedSmooth, length);
+            progress.store (static_cast<float> (position / length));
+            if (stopping && fadeGain <= 0) { stopping = false; state.store (static_cast<int> (LooperState::stopped)); }
         }
+        lastBeat = beat;
     }
-
 private:
-    void handlePendingCommand() noexcept
+    void finish (bool stop, const EngineParameters& p) noexcept
     {
-        const auto read = commandRead.load (std::memory_order_relaxed);
-        if (read == commandWrite.load (std::memory_order_acquire)) return;
-        auto command = commands[read];
-        commandRead.store ((read + 1u) % commands.size(), std::memory_order_release);
-        if (command == LooperCommand::none)
-            return;
-
-        auto current = currentState();
-        if (command == LooperCommand::record)
-        {
-            if (current != LooperState::empty && current != LooperState::recording) return;
-            command = LooperCommand::recordPlayDub;
-        }
-        else if (command == LooperCommand::play)
-        {
-            if (current == LooperState::recording || current == LooperState::overdubbing || current == LooperState::stopped)
-                command = LooperCommand::recordPlayDub;
-            else return;
-        }
-        else if (command == LooperCommand::dub)
-        {
-            if (current == LooperState::playing || current == LooperState::overdubbing)
-                command = LooperCommand::recordPlayDub;
-            else return;
-        }
-        else if (command == LooperCommand::stop)
-        {
-            if (current == LooperState::playing || current == LooperState::overdubbing || current == LooperState::recording)
-                command = LooperCommand::stopPlay;
-            else return;
-        }
-        if (command == LooperCommand::clear)
-        {
-            length = 0;
-            recordPosition = 0;
-            playPosition = 0.0;
-            canUndo = false;
-            state.store (static_cast<int> (LooperState::empty));
-            progress.store (0.0f);
-            return;
-        }
-
-        if (command == LooperCommand::undo)
-        {
-            if (canUndo) layerEnabled[generation] = false;
-            canUndo = false;
-            if (current == LooperState::overdubbing)
-                state.store (static_cast<int> (LooperState::playing));
-            return;
-        }
-
-        if (command == LooperCommand::stopPlay)
-        {
-            if (current == LooperState::recording)
-                finishRecording (true);
-            else if (current == LooperState::playing || current == LooperState::overdubbing)
-                state.store (static_cast<int> (LooperState::stopped));
-            else if (current == LooperState::stopped && length > 1)
-                state.store (static_cast<int> (LooperState::playing));
-            return;
-        }
-
-        if (command != LooperCommand::recordPlayDub)
-            return;
-
-        if (current == LooperState::empty || (current == LooperState::stopped && length <= 1))
-        {
-            generation = 1u;
-            layerEnabled[1] = true;
-            length = 0;
-            recordPosition = 0;
-            playPosition = 0.0;
-            canUndo = false;
-            state.store (static_cast<int> (LooperState::recording));
-        }
-        else if (current == LooperState::recording)
-        {
-            finishRecording (false);
-        }
-        else if (current == LooperState::stopped)
-        {
-            state.store (static_cast<int> (LooperState::playing));
-        }
-        else if (current == LooperState::playing)
-        {
-            // Fixed storage keeps arbitrarily fast commands allocation-free.
-            if (generation + 1u >= layerEnabled.size()) return;
-            ++generation;
-            layerEnabled[generation] = true;
-            canUndo = false;
-            state.store (static_cast<int> (LooperState::overdubbing));
-        }
-        else if (current == LooperState::overdubbing)
-        {
-            state.store (static_cast<int> (LooperState::playing));
-        }
+        auto& data = *slots[active.load()];
+        for (int i = recordPosition; i < 2; ++i) { const auto tag = data.stamps[i].load(); data.stamps[i].store (tag + 0x10000u); data.base[0][i].store (0); data.base[1][i].store (0); data.stamps[i].store ((tag + 0x20000u) & ~std::uint64_t (65535)); }
+        data.length.store (std::max (recordPosition, 2));
+        position = 0; fadeGain = 0; progress.store (0);
+        state.store (static_cast<int> (stop ? LooperState::stopped : p.recordIntoDub ? LooperState::overdubbing : LooperState::playing));
     }
-
-    void finishRecording (bool stopAfter) noexcept
+    void execute (LooperCommand cmd, const EngineParameters& p, double beat) noexcept
     {
-        length = std::max (recordPosition, 2);
-        if (recordPosition < 2)
-            for (int sample = recordPosition; sample < 2; ++sample)
-            {
-                base[0][static_cast<std::size_t> (sample)] = 0.0f;
-                base[1][static_cast<std::size_t> (sample)] = 0.0f;
-                overdubStamp[static_cast<std::size_t> (sample)] = 0;
-            }
-        playPosition = 0.0;
-        progress.store (0.0f);
-        state.store (static_cast<int> (stopAfter ? LooperState::stopped : LooperState::playing));
+        auto& data = *slots[active.load()]; auto st = currentState();
+        if (cmd == LooperCommand::clear) { data.length.store (0); state.store (static_cast<int> (LooperState::empty)); canUndo = false; stopping = false; pending.store (false); progress.store (0); return; }
+        if (cmd == LooperCommand::undo) { if (canUndo) { data.layers[generation].store (false); canUndo = false; if (st == LooperState::overdubbing) state.store (static_cast<int> (LooperState::playing)); } return; }
+        if (cmd == LooperCommand::burstStart) { data.length.store (0); st = LooperState::empty; cmd = LooperCommand::record; }
+        if (cmd == LooperCommand::burstEnd) { if (st == LooperState::recording) { auto options = p; options.recordIntoDub = false; finish (false, options); } return; }
+        if (cmd == LooperCommand::stop || (cmd == LooperCommand::stopPlay && st != LooperState::stopped))
+        { if (st == LooperState::recording) finish (true, p); else if (st == LooperState::playing || st == LooperState::overdubbing) { stopping = p.loopFade > 0 && p.fadeMode != 1; state.store (static_cast<int> (stopping ? LooperState::playing : LooperState::stopped)); } return; }
+        if (cmd == LooperCommand::record && st != LooperState::empty && st != LooperState::recording) return;
+        if (cmd == LooperCommand::play || (cmd == LooperCommand::stopPlay && st == LooperState::stopped))
+        { if (st == LooperState::recording) finish (false, p); else if (st != LooperState::empty) { state.store (static_cast<int> (LooperState::playing)); fadeGain = 0; stopping = false; } return; }
+        if (cmd == LooperCommand::dub && st != LooperState::playing && st != LooperState::overdubbing) return;
+        if (st == LooperState::empty) { recordPosition = 0; generation = 1; data.layers[1].store (true); canUndo = false; originBeat = beat; stopping = false; state.store (static_cast<int> (LooperState::recording)); }
+        else if (st == LooperState::recording) finish (false, p);
+        else if (st == LooperState::playing) { if (generation < 65535) { ++generation; data.layers[generation].store (true); canUndo = false; state.store (static_cast<int> (LooperState::overdubbing)); } }
+        else { stopping = false; state.store (static_cast<int> (LooperState::playing)); }
     }
-
-    float readLoop (int channel, double position) const noexcept
-    {
-        position = wrapPosition (position, static_cast<double> (length));
-        const auto index0 = static_cast<int> (position);
-        const auto index1 = (index0 + 1) % length;
-        const auto fraction = static_cast<float> (position - static_cast<double> (index0));
-        auto value0 = base[static_cast<std::size_t> (channel)][static_cast<std::size_t> (index0)];
-        auto value1 = base[static_cast<std::size_t> (channel)][static_cast<std::size_t> (index1)];
-            if (overdubStamp[static_cast<std::size_t> (index0)] != 0u && layerEnabled[overdubStamp[static_cast<std::size_t> (index0)]])
-                value0 += overdub[static_cast<std::size_t> (channel)][static_cast<std::size_t> (index0)];
-            if (overdubStamp[static_cast<std::size_t> (index1)] != 0u && layerEnabled[overdubStamp[static_cast<std::size_t> (index1)]])
-                value1 += overdub[static_cast<std::size_t> (channel)][static_cast<std::size_t> (index1)];
-        return lerp (value0, value1, fraction);
-    }
-
-    std::array<std::vector<float>, 2> base;
-    std::array<std::vector<float>, 2> overdub;
-    std::vector<std::uint32_t> overdubStamp;
-    std::array<bool, 65536> layerEnabled {};
+    std::array<std::unique_ptr<Storage>, 3> slots;
+    std::atomic<int> active { 0 }, pendingSlot { -1 }, reader { -1 };
+    std::mutex archiveMutex;
     std::array<LooperCommand, 64> commands {};
     std::atomic<std::size_t> commandRead { 0 }, commandWrite { 0 };
-    std::atomic<int> state { static_cast<int> (LooperState::empty) };
-    std::atomic<float> progress { 0.0f };
-    int length = 0;
-    int recordPosition = 0;
-    double playPosition = 0.0;
-    std::uint32_t generation = 1u;
-    bool canUndo = false;
-    double sampleRate = 44100.0;
+    std::atomic<int> state { 0 }; std::atomic<float> progress { 0 }; std::atomic<bool> pending { false };
+    LooperCommand pendingCommand = LooperCommand::none;
+    double position = 0, sampleRate = 44100, internalBeat = 0, originBeat = 0, lastBeat = -1, targetBeat = 0;
+    int recordPosition = 0; unsigned generation = 1;
+    bool canUndo = false, stopping = false;
+    float fadeGain = 0, speedSmooth = 1;
 };
 } // namespace
 
@@ -988,6 +954,9 @@ struct Engine::Impl
         sampleRate = clamp (newSampleRate, 8000.0, 384000.0);
         maximumBlockSize = std::max (newMaximumBlockSize, 16);
         capture.prepare (static_cast<int> (sampleRate * 12.0));
+        historySize = static_cast<int> (sampleRate * 32.0);
+        for (auto& c : history) c = std::make_unique<std::atomic<float>[]> (static_cast<std::size_t> (historySize));
+        historyClock.store (0);
         delay.prepare (sampleRate);
         modulation.prepare (sampleRate);
         reverseCloud.prepare (sampleRate);
@@ -1002,7 +971,9 @@ struct Engine::Impl
 
     void reset()
     {
-        capture.clear();
+        capture.clear(); historyClock.store (0);
+        fieldPitch = fieldPosition = magnetEnvelope = 0.f; fieldStretch = 1.f;
+        wasTrailsBypassed = false; wasHostPlaying = false; expectedPpq = 0; previousSeed = -1;
         delay.reset();
         modulation.reset();
         reverseCloud.reset();
@@ -1086,7 +1057,7 @@ struct Engine::Impl
 
         if ((mode == Mode::pluck || mode == Mode::ladder) && onsetCount > 0)
         {
-            const auto remembered = recentOnsetDelay (sequenceStep + voice);
+            const auto remembered = recentOnsetDelay (eventStep + voice);
             if (remembered > 0.0 && remembered < available)
                 return remembered;
         }
@@ -1098,7 +1069,7 @@ struct Engine::Impl
             return 32.0 + random.nextFloat() * std::min (history, sampleRate * 1.2);
         if (mode == Mode::chain || mode == Mode::chop || mode == Mode::breakUp)
         {
-            const auto slices = 1 + (sequenceStep + voice * 3) % 8;
+            const auto slices = 1 + (eventStep + voice * 3) % 8;
             return clamp (grid * 0.25 * static_cast<double> (slices), 20.0, history);
         }
         return 24.0 + random.nextFloat() * std::min (history, sampleRate * 0.8);
@@ -1107,7 +1078,7 @@ struct Engine::Impl
     std::pair<double, double> ratesFor (Mode mode, int variation, int voice) noexcept
     {
         variation = clamp (variation, 0, 3);
-        const auto index = static_cast<std::size_t> ((sequenceStep + voice) & 3);
+        const auto index = static_cast<std::size_t> ((eventStep + voice) & 3);
         static constexpr std::array<double, 4> upDown { 0.5, 1.0, 2.0, 4.0 };
         static constexpr std::array<double, 4> ladderA { 1.0, 1.259921, 1.498307, 2.0 };
         static constexpr std::array<double, 4> ladderB { 1.0, 0.749154, 0.5, 1.33484 };
@@ -1130,8 +1101,8 @@ struct Engine::Impl
                 return voice % 2 == 0 ? std::pair<double, double> { 0.5, 2.0 }
                                       : std::pair<double, double> { 2.0, 0.5 };
             case Mode::veil:
-                if (variation == 0) return { 0.94 + random.nextFloat() * 0.12, 0.94 + random.nextFloat() * 0.12 };
-                if (variation == 1) return { 0.72 + random.nextFloat() * 0.62, 0.72 + random.nextFloat() * 0.62 };
+                if (variation == 0) return { 0.94 + pitchRandom.nextFloat() * 0.12, 0.94 + pitchRandom.nextFloat() * 0.12 };
+                if (variation == 1) return { 0.72 + pitchRandom.nextFloat() * 0.62, 0.72 + pitchRandom.nextFloat() * 0.62 };
                 if (variation == 2) return { voice % 2 == 0 ? 1.0 : 2.0, voice % 2 == 0 ? 1.0 : 2.0 };
                 return { voice % 2 == 0 ? 1.0 : 0.5, voice % 2 == 0 ? 1.0 : 0.5 };
             case Mode::orbit:
@@ -1146,7 +1117,7 @@ struct Engine::Impl
             case Mode::breakUp:
                 if (variation == 1) return { upDown[index], upDown[index] };
                 if (variation == 3) return { upDown[(index + 1) & 3] * 0.5, upDown[(index + 1) & 3] * 0.5 };
-                return { 0.88 + random.nextFloat() * 0.24, 0.88 + random.nextFloat() * 0.24 };
+                return { 0.88 + pitchRandom.nextFloat() * 0.24, 0.88 + pitchRandom.nextFloat() * 0.24 };
             case Mode::ladder:
                 if (variation == 0) return { ladderA[index], ladderA[index] };
                 if (variation == 1) return { ladderB[index], ladderB[index] };
@@ -1160,13 +1131,31 @@ struct Engine::Impl
         }
     }
 
+    static std::uint32_t hash (std::uint32_t a) noexcept
+    { a ^= a >> 16; a *= 0x7feb352du; a ^= a >> 15; a *= 0x846ca68bu; return a ^ (a >> 16); }
+    float rhythmValue (const EngineParameters& p) const noexcept
+    { return static_cast<float> (hash (static_cast<unsigned> (p.seed + p.rhythmMutation * 7919) ^ static_cast<unsigned> (sequenceStep % std::max (1, p.patternSteps))) & 65535u) / 65535.f; }
+    double tunedRate (double rate, const EngineParameters& p) const noexcept
+    {
+        if (p.scale == 0) return rate;
+        constexpr unsigned masks[] { 4095, 2741, 1453, 661, 1193 };
+        const auto note = 12.0 * std::log2 (std::max (.01, rate)) + p.sourceNote;
+        int best = static_cast<int> (std::round (note)); double distance = 100;
+        for (int i = static_cast<int> (std::floor (note)) - 12; i <= static_cast<int> (std::ceil (note)) + 12; ++i)
+            if ((masks[clamp (p.scale, 0, 4)] & (1u << ((i - p.root + 120) % 12))))
+                if (std::abs (i - note) < distance) { best = i; distance = std::abs (i - note); }
+        return std::pow (2.0, (best - p.sourceNote) / 12.0);
+    }
     void spawnEvent (const EngineParameters& parameters, double grid, bool onsetHit) noexcept
     {
+        const auto step = parameters.patternLock ? sequenceStep % std::max (1, parameters.patternSteps) : sequenceStep;
+        eventStep = step;
+        random.seed (hash (static_cast<unsigned> (parameters.seed) ^ static_cast<unsigned> (step + 1)));
         const auto mode = parameters.mode;
         if (mode == Mode::grid)
             return;
-        if (mode == Mode::breakUp && ! onsetHit && random.nextFloat() > 0.2f + parameters.density * 0.62f)
-            return;
+        if (mode == Mode::breakUp && ! onsetHit && rhythmValue (parameters) > 0.2f + parameters.density * 0.62f)
+        { ++sequenceStep; return; }
         if (mode == Mode::pluck && onsetCount == 0)
             return;
 
@@ -1177,13 +1166,21 @@ struct Engine::Impl
         if (mode == Mode::ladder) voices = 1;
         if (mode == Mode::smear) voices = 1 + static_cast<int> (parameters.density * 1.99f);
 
+        voices += static_cast<int> (parameters.fieldSplit * 4.f);
         for (int voice = 0; voice < voices; ++voice)
         {
             const auto readDelay = chooseReadDelay (mode, grid, voice);
             if (readDelay < 0.0)
                 continue;
 
+            pitchRandom.seed (hash (static_cast<unsigned> (parameters.seed + parameters.pitchMutation * 104729) ^ static_cast<unsigned> (step * 17 + voice + 1)));
             auto rates = ratesFor (mode, parameters.variation, voice);
+            if (parameters.pitchMutation != 0)
+            {
+                constexpr std::array<double,6> intervals { 1.,1.189207,1.33484,1.498307,2.,.5 };
+                const auto interval = intervals[pitchRandom.nextU32() % intervals.size()]; rates.first *= interval; rates.second *= interval;
+            }
+            rates.first = tunedRate (rates.first, parameters); rates.second = tunedRate (rates.second, parameters);
             if (parameters.reverse)
             {
                 rates.first = -rates.first;
@@ -1214,6 +1211,12 @@ struct Engine::Impl
                                     gain,
                                     pan + random.bipolar() * 0.12f,
                                     parameters.shape);
+            grain->readSpan = static_cast<float> (sampleRate * 2.0);
+            grain->tone = 1.f;
+            if ((mode == Mode::chain && parameters.variation == 0) || (mode == Mode::ladder && parameters.variation == 2))
+                grain->tone = .02f + random.nextFloat() * .45f;
+            if ((mode == Mode::orbit && parameters.variation == 2) || (mode == Mode::chop && parameters.variation == 2))
+                grain->tone = .03f + parameters.shape * .2f;
         }
         ++sequenceStep;
     }
@@ -1243,17 +1246,43 @@ struct Engine::Impl
         const auto bpm = clamp (parameters.bpm, 30.0, 300.0);
         const auto quarter = sampleRate * 60.0 / bpm;
         const auto grid = clamp (quarter * divisionFactor (parameters.division), 32.0, sampleRate * 4.0);
-        filterL.set (parameters.cutoffHz, parameters.resonance);
-        filterR.set (parameters.cutoffHz, parameters.resonance);
-
+        if (parameters.seed != previousSeed) { sequenceStep = 0; spawnCountdown = 0; previousSeed = parameters.seed; }
+        if (parameters.hostPositionValid && parameters.hostPlaying)
+        {
+            if (! wasHostPlaying || std::abs (parameters.hostPpq - expectedPpq) > .02)
+            {
+                const auto interval = std::max (12., intervalFor (parameters, grid));
+                const auto timeline = parameters.hostPpq * quarter;
+                spawnCountdown = std::fmod (interval - std::fmod (timeline, interval), interval);
+                sequenceStep = std::max (0, static_cast<int> (std::floor (timeline / interval)));
+                for (auto& grain : grains) grain.active = false;
+            }
+            expectedPpq = parameters.hostPpq + samples / quarter;
+        }
+        wasHostPlaying = parameters.hostPositionValid && parameters.hostPlaying;
+        auto material = parameters;
+        const auto friction = 1.f - std::exp (-1.f / static_cast<float> (sampleRate * (.004 + parameters.viscosity * .6)));
+        const auto attack = 1.f - std::exp (-1.f / static_cast<float> (sampleRate * parameters.magnetAttack));
+        const auto magnetRelease = 1.f - std::exp (-1.f / static_cast<float> (sampleRate * parameters.magnetRelease));
         auto blockInputPeak = 0.0f;
         auto blockEffectPeak = 0.0f;
         auto countedActiveGrains = 0;
 
         for (int sample = 0; sample < samples; ++sample)
         {
-            const auto inputL = stage[0][static_cast<std::size_t> (sample)];
-            const auto inputR = stage[1][static_cast<std::size_t> (sample)];
+            const auto inputL = parameters.bypass && parameters.trails ? 0.f : stage[0][static_cast<std::size_t> (sample)];
+            const auto inputR = parameters.bypass && parameters.trails ? 0.f : stage[1][static_cast<std::size_t> (sample)];
+            const auto side = parameters.sidechain ? std::abs (parameters.sidechain[sample]) : 0.f;
+            const auto previousMagnet = magnetEnvelope;
+            magnetEnvelope += (side > magnetEnvelope ? attack : magnetRelease) * (side - magnetEnvelope);
+            const auto magnetic = std::tanh (magnetEnvelope * 5.f) * parameters.magnetAmount;
+            fieldPosition += friction * (parameters.fieldPosition - fieldPosition);
+            fieldPitch += friction * (parameters.fieldPitch - fieldPitch);
+            fieldStretch += friction * (parameters.fieldStretch - fieldStretch);
+            material.fieldPosition = fieldPosition;
+            material.fieldPitch = fieldPitch;
+            material.fieldStretch = fieldStretch * (parameters.magnetMode == 0 ? 1.f - magnetic * .65f : 1.f);
+            material.cohesion = clamp (parameters.cohesion + (parameters.magnetMode == 2 ? magnetic : 0.f), 0.f, 1.f);
             blockInputPeak = std::max ({ blockInputPeak, std::abs (inputL), std::abs (inputR) });
 
             if (! parameters.freeze)
@@ -1273,16 +1302,17 @@ struct Engine::Impl
 
             spawnCountdown -= 1.0;
             auto shouldSpawn = spawnCountdown <= 0.0;
-            if (onsetHit && (parameters.mode == Mode::pluck
+            if (! parameters.patternLock && onsetHit && (parameters.mode == Mode::pluck
                              || parameters.mode == Mode::chop
                              || parameters.mode == Mode::breakUp
                              || parameters.mode == Mode::ladder))
                 shouldSpawn = true;
 
-            if (shouldSpawn)
+            if (parameters.magnetMode == 1 && previousMagnet < .08f && magnetEnvelope >= .08f && parameters.magnetAmount > 0.f) shouldSpawn = true;
+            if (shouldSpawn && ! parameters.looperOnly && ! (parameters.bypass && parameters.trails))
             {
                 spawnEvent (parameters, grid, onsetHit);
-                spawnCountdown = std::max (intervalFor (parameters, grid), 12.0);
+                spawnCountdown = std::max (intervalFor (parameters, grid) * (parameters.rhythmMutation != 0 ? .5 + rhythmValue (parameters) : 1.0), 12.0);
             }
 
             float effectL = 0.0f;
@@ -1290,7 +1320,7 @@ struct Engine::Impl
             auto active = 0;
 
             if (parameters.mode == Mode::grid || parameters.mode == Mode::smear)
-                delay.process (inputL, inputR, parameters, effectL, effectR);
+                delay.process (inputL, inputR, material, effectL, effectR);
 
             if (parameters.mode != Mode::grid)
             {
@@ -1298,7 +1328,7 @@ struct Engine::Impl
                 float grainR = 0.0f;
                 for (auto& grain : grains)
                 {
-                    grain.process (capture, ! parameters.freeze, grainL, grainR);
+                    grain.process (capture, ! parameters.freeze, material, grainL, grainR);
                     if (grain.active)
                         ++active;
                 }
@@ -1325,10 +1355,15 @@ struct Engine::Impl
                 effectR = std::round (effectR * steps) / steps;
             }
 
+            if (parameters.looperOnly) { effectL = inputL; effectR = inputR; }
+            if (parameters.magnetMode == 0) { effectL *= 1.f - magnetic * .8f; effectR *= 1.f - magnetic * .8f; }
             reverseCloud.process (effectL, effectR, parameters.reverse, bpm, parameters.division);
             modulation.process (effectL, effectR, parameters.modulationDepth, parameters.modulationRateHz);
 
-            smoothedCutoff += 0.0015f * (parameters.cutoffHz - smoothedCutoff);
+            auto targetCutoff = parameters.cutoffHz;
+            if (parameters.mode == Mode::orbit && (parameters.variation == 1 || parameters.variation == 3))
+                targetCutoff *= .25f + .75f * (.5f + .5f * std::sin (static_cast<float> (sampleClock + sample) / static_cast<float> (quarter) * pi));
+            smoothedCutoff += 0.0015f * (targetCutoff - smoothedCutoff);
             filterL.set (smoothedCutoff, parameters.resonance);
             filterR.set (smoothedCutoff, parameters.resonance);
             effectL = filterL.process (effectL);
@@ -1363,8 +1398,10 @@ struct Engine::Impl
                   float* const* outputs,
                   int channels,
                   int samples,
-                  const EngineParameters& parameters)
+                  const EngineParameters& incoming)
     {
+        auto parameters = incoming;
+        if (parameters.bypass && parameters.trails) parameters.freeze = false;
         if (samples <= 0 || inputs == nullptr || outputs == nullptr)
             return;
         if (samples > maximumBlockSize)
@@ -1374,11 +1411,22 @@ struct Engine::Impl
             {
                 const float* chunkIn[] { inputs[0] + offset, inputs[actualChannels - 1] + offset };
                 float* chunkOut[] { outputs[0] + offset, outputs[actualChannels - 1] + offset };
-                process (chunkIn, chunkOut, actualChannels, std::min (maximumBlockSize, samples - offset), parameters);
+                auto chunkParameters = parameters;
+                chunkParameters.hostPpq += offset / (sampleRate * 60.0 / parameters.bpm);
+                if (parameters.sidechain) chunkParameters.sidechain += offset;
+                process (chunkIn, chunkOut, actualChannels, std::min (maximumBlockSize, samples - offset), chunkParameters);
             }
             return;
         }
 
+        looper.beginBlock();
+        auto loopParameters = parameters;
+        if (parameters.bypass && parameters.trails)
+        {
+            loopParameters.loopFade = std::max (.05f, parameters.loopFade); loopParameters.fadeMode = 0; loopParameters.quantize = false;
+            if (! wasTrailsBypassed) looper.request (LooperCommand::stop);
+        }
+        wasTrailsBypassed = parameters.bypass && parameters.trails;
         const auto actualChannels = clamp (channels, 1, 2);
         for (int sample = 0; sample < samples; ++sample)
         {
@@ -1391,9 +1439,7 @@ struct Engine::Impl
             for (int sample = 0; sample < samples; ++sample)
                 looper.process (dry[0][static_cast<std::size_t> (sample)],
                                 dry[1][static_cast<std::size_t> (sample)],
-                                parameters.looperLevel,
-                                parameters.looperReverse,
-                                parameters.looperSpeed,
+                                loopParameters, sample,
                                 stage[0][static_cast<std::size_t> (sample)],
                                 stage[1][static_cast<std::size_t> (sample)]);
         }
@@ -1413,9 +1459,7 @@ struct Engine::Impl
                 float loopedR = 0.0f;
                 looper.process (wet[0][static_cast<std::size_t> (sample)],
                                 wet[1][static_cast<std::size_t> (sample)],
-                                parameters.looperLevel,
-                                parameters.looperReverse,
-                                parameters.looperSpeed,
+                                loopParameters, sample,
                                 loopedL,
                                 loopedR);
                 wet[0][static_cast<std::size_t> (sample)] = loopedL;
@@ -1426,10 +1470,16 @@ struct Engine::Impl
         for (int sample = 0; sample < samples; ++sample)
         {
             const auto index = static_cast<std::size_t> (sample);
-            smoothedBypass += 0.003f * ((parameters.bypass ? 1.0f : 0.0f) - smoothedBypass);
+            smoothedBypass += 0.003f * ((parameters.bypass && ! parameters.trails ? 1.0f : 0.0f) - smoothedBypass);
             outputs[0][sample] = lerp (wet[0][index], dry[0][index], smoothedBypass);
             if (actualChannels > 1)
                 outputs[1][sample] = lerp (wet[1][index], dry[1][index], smoothedBypass);
+            if (parameters.bypass && parameters.trails)
+            { outputs[0][sample] += dry[0][index]; if (actualChannels > 1) outputs[1][sample] += dry[1][index]; }
+            const auto historyIndex = historyClock.load (std::memory_order_relaxed) % static_cast<std::uint64_t> (historySize);
+            history[0][historyIndex].store (outputs[0][sample], std::memory_order_relaxed);
+            history[1][historyIndex].store (outputs[actualChannels - 1][sample], std::memory_order_relaxed);
+            historyClock.fetch_add (1, std::memory_order_release);
             outputPeak = std::max ({ outputPeak * 0.99988f, std::abs (outputs[0][sample]),
                                      std::abs (outputs[actualChannels - 1][sample]) });
             std::array<float, 3> bandPower {};
@@ -1482,6 +1532,9 @@ struct Engine::Impl
         frame.mode = parameters.mode;
         frame.variation = parameters.variation;
         frame.bpm = parameters.bpm;
+        frame.viscosity = parameters.viscosity; frame.cohesion = parameters.cohesion; frame.tension = parameters.tension;
+        frame.magnet = std::tanh (magnetEnvelope * 5.f) * parameters.magnetAmount;
+        frame.fieldPosition = fieldPosition; frame.fieldPitch = fieldPitch; frame.fieldStretch = fieldStretch; frame.fieldSplit = parameters.fieldSplit;
         frame.held = parameters.freeze;
         frame.reverse = parameters.reverse;
         frame.bypass = parameters.bypass;
@@ -1504,10 +1557,10 @@ struct Engine::Impl
                 voice.id = grain.id;
                 voice.phase = grain.age / grain.duration;
                 voice.duration = grain.duration / static_cast<float> (sampleRate);
-                voice.rate = static_cast<float> (grain.rate);
+                voice.rate = static_cast<float> (grain.rate * std::pow (2., fieldPitch / 12.));
                 voice.pan = grain.pan;
-                voice.envelope = std::pow (std::max (0.0f, std::sin (pi * voice.phase)), grain.envelopePower);
-                voice.envelopePower = grain.envelopePower;
+                voice.envelope = std::pow (std::max (0.0f, std::sin (pi * voice.phase)), clamp (grain.envelopePower + (parameters.tension - .5f) * 3.f, .2f, 6.f));
+                voice.envelopePower = clamp (grain.envelopePower + (parameters.tension - .5f) * 3.f, .2f, 6.f);
                 voice.level = grain.level;
                 for (std::size_t point = 0; point < voice.waveform.size(); ++point)
                 {
@@ -1538,6 +1591,12 @@ struct Engine::Impl
 
     double sampleRate = 44100.0;
     int maximumBlockSize = 512;
+    std::array<std::unique_ptr<std::atomic<float>[]>, 2> history;
+    std::atomic<std::uint64_t> historyClock { 0 };
+    int historySize = 1, previousSeed = -1;
+    float fieldPosition = 0.f, fieldPitch = 0.f, fieldStretch = 1.f, magnetEnvelope = 0.f;
+    bool wasTrailsBypassed = false;
+    bool wasHostPlaying = false; double expectedPpq = 0;
     StereoRing capture;
     MultiTapDelay delay;
     ModulatedDelay modulation;
@@ -1552,9 +1611,9 @@ struct Engine::Impl
     std::array<std::vector<float>, 2> dry;
     std::array<std::vector<float>, 2> stage;
     std::array<std::vector<float>, 2> wet;
-    Random random;
+    Random random, pitchRandom;
     int onsetCount = 0;
-    int sequenceStep = 0;
+    int sequenceStep = 0, eventStep = 0;
     double spawnCountdown = 0.0;
     float feedbackL = 0.0f;
     float feedbackR = 0.0f;
@@ -1599,6 +1658,19 @@ void Engine::process (const float* const* inputs,
 {
     impl->process (inputs, outputs, channels, samples, parameters);
 }
+
+AudioSnapshot Engine::snapshotHistory (double seconds)
+{
+    AudioSnapshot snapshot; snapshot.sampleRate = impl->sampleRate; snapshot.playing = true;
+    const auto end = impl->historyClock.load (std::memory_order_acquire);
+    const auto count = std::min ({ end, static_cast<std::uint64_t> (impl->historySize), static_cast<std::uint64_t> (std::max (0.0, seconds) * impl->sampleRate) });
+    for (auto& c : snapshot.audio) c.resize (static_cast<std::size_t> (count));
+    for (std::uint64_t i = 0; i < count; ++i) for (int c = 0; c < 2; ++c)
+        snapshot.audio[c][i] = impl->history[c][(end - count + i) % static_cast<std::uint64_t> (impl->historySize)].load (std::memory_order_relaxed);
+    return snapshot;
+}
+AudioSnapshot Engine::snapshotLoop() { return impl->looper.snapshot(); }
+bool Engine::restoreLoop (const AudioSnapshot& audio) { return impl->looper.restore (audio); }
 
 void Engine::requestLooperCommand (LooperCommand command) noexcept
 {

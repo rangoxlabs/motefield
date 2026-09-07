@@ -227,7 +227,7 @@ void MoteFieldLookAndFeel::drawButtonText (juce::Graphics& g, juce::TextButton& 
     const auto scale = static_cast<float> (style == 2 ? juce::jmin (button.getWidth(), button.getHeight()) : button.getHeight()) / (style == 2 ? 114.0f : style == 1 ? 32.0f : style == 5 ? 45.0f : 34.0f);
     if (style == 6) bounds.removeFromLeft (32.0f * scale);
     const auto colour = button.isEnabled() ? (style == 2 && button.getComponentID() != "freeze" && ! button.getToggleState() ? paper : style == 5 && button.getToggleState() ? paper : ink) : muted.withAlpha (.52f);
-    text (g, button.getButtonText(), bounds, (style == 2 || style == 5 ? 16.0f : style == 1 ? 13.0f : 11.0f) * scale,
+    text (g, button.getButtonText(), bounds, (button.getProperties()["panelButton"] ? 12.5f : style == 2 || style == 5 ? 16.0f : style == 1 ? 13.0f : 11.0f) * scale,
           colour, style != 1 || button.getToggleState(), style == 6 ? juce::Justification::centredLeft : juce::Justification::centred,
           style == 1 ? 0.0f : .04f);
 }
@@ -363,8 +363,8 @@ void FieldDisplay::update (const motefield::VisualFrame& next)
         cluster.y += voice.y * voice.energy;cluster.bend += voice.bend * voice.energy;
         weight += voice.energy;meanX += voice.x * voice.energy;meanY += voice.y * voice.energy;
     }
-    const auto targetX = 240.f + (weight > .001f && ! reducedMotion ? (meanX / weight - .5f) * 45.f : 0.f);
-    const auto targetY = 72.f + (weight > .001f && ! reducedMotion ? (meanY / weight - .5f) * 22.f : 0.f);
+    const auto targetX = 240.f + (weight > .001f && ! reducedMotion ? (meanX / weight - .5f) * 45.f : 0.f) + (reducedMotion ? 0.f : (next.fieldPosition * 2.f - next.fieldSplit) * 55.f);
+    const auto targetY = 72.f + (weight > .001f && ! reducedMotion ? (meanY / weight - .5f) * 22.f : 0.f) - (reducedMotion ? 0.f : next.fieldPitch * .6f);
     centreX += (targetX - centreX) * (1.f - std::exp (-dt * 14.f));
     centreY += (targetY - centreY) * (1.f - std::exp (-dt * 14.f));
     const auto spring = [dt] (float& position, float& velocity, float destination, float speed)
@@ -385,13 +385,13 @@ void FieldDisplay::update (const motefield::VisualFrame& next)
         const auto alive = cluster.energy > .0001f;
         const auto tx = alive ? cluster.x / cluster.energy * liquidWidth : centreX;
         const auto ty = alive ? cluster.y / cluster.energy * liquidHeight : centreY;
-        const auto spread = .35f + .65f * amount;
+        const auto spread = (.35f + .65f * amount) * (1.5f - next.cohesion) + next.fieldSplit * .35f;
         const auto x = reducedMotion ? 95.f + i * 72.f : centreX + (tx - centreX) * spread;
         const auto y = reducedMotion ? 72.f : centreY + (ty - centreY) * spread;
-        spring (body.x, body.vx, juce::jlimit (55.f, liquidWidth - 55.f, x), 22.f);
-        spring (body.y, body.vy, juce::jlimit (43.f, liquidHeight - 43.f, y), 22.f);
+        spring (body.x, body.vx, juce::jlimit (55.f, liquidWidth - 55.f, x), 30.f - next.viscosity * 20.f);
+        spring (body.y, body.vy, juce::jlimit (43.f, liquidHeight - 43.f, y), 30.f - next.viscosity * 20.f);
         spring (body.radius, body.vr, 27.f * std::sqrt (amount), 28.f);
-        spring (body.stretch, body.vs, alive && ! reducedMotion ? 1.f + cluster.bend / cluster.energy * .4f : 1.f, 24.f);
+        spring (body.stretch, body.vs, alive && ! reducedMotion ? juce::jlimit (.7f,1.4f, std::sqrt (next.fieldStretch)) + cluster.bend / cluster.energy * .4f : 1.f, 24.f);
     }
     frame = next;
     const auto moving = std::any_of (liquidVoices.begin(), liquidVoices.end(), [] (const auto& voice) { return voice.energy >= .0001f; });
@@ -408,8 +408,8 @@ void FieldDisplay::renderLiquid()
     // All bodies contribute to one implicit surface. Shared normals remove
     // draw-order seams when grains join, split or move through one another.
     liquidField.fill (0.f);liquidHeat.fill (0.f);liquidGradientY.fill (0.f);
-    constexpr float blend = 18.f * 18.f;
-    const auto deposit = [this] (float cx, float cy, float radius, float stretch, float strength = 1.f)
+    const float blend = std::pow (12.f + frame.cohesion * 12.f, 2.f);
+    const auto deposit = [this, blend] (float cx, float cy, float radius, float stretch, float strength = 1.f)
     {
         const auto ax = 1.f / stretch, ay = stretch;
         const auto reach = std::sqrt (radius * radius + blend * 8.f);
@@ -440,7 +440,7 @@ void FieldDisplay::renderLiquid()
     // The main mass responds to frequency content, not only a slow peak meter.
     const auto radius = 32.f + lowDrive * 8.f + midDrive * 3.f;
     deposit (centreX, centreY, radius, reducedMotion ? 1.f : 1.f + lowDrive * .24f - midDrive * .22f);
-    const auto tension = reducedMotion ? 0.f : midDrive * .65f + highDrive * .85f;
+    const auto tension = reducedMotion ? 0.f : (midDrive * .65f + highDrive * .85f) * (.25f + frame.tension * 1.5f) + frame.magnet * .5f;
     if (tension > .0001f)
         for (int pole = 0; pole < 5; ++pole)
         {
@@ -477,6 +477,37 @@ void FieldDisplay::renderLiquid()
             const auto v = juce::jlimit (0.f, 1.f, (8.f + light * light * light * 15.f + key * 146.f + fill * 100.f + rim * rim * rim * 12.f) / 255.f);
             pixels.setPixelColour (x, y, juce::Colour::fromFloatRGBA (v * .96f, v, v * .91f, alpha));
         }
+}
+
+void FieldDisplay::mouseDown (const juce::MouseEvent& e)
+{
+    if (! gesture || e.position.x > getWidth() * .72f || e.position.y < getHeight() * .22f) return;
+    dragging = true; dragStart = e.position; gestureMode = e.mods.isAltDown() ? 2 : e.mods.isShiftDown() ? 1 : 0;
+    startX = gestureMode == 1 ? frame.fieldStretch : gestureMode == 2 ? frame.fieldSplit : frame.fieldPosition;
+    startY = frame.fieldPitch;
+    gesture (gestureMode == 1 ? "fieldStretch" : gestureMode == 2 ? "fieldSplit" : "fieldPosition", startX, 0);
+    if (gestureMode == 0) gesture ("fieldPitch", startY, 0);
+}
+void FieldDisplay::mouseDrag (const juce::MouseEvent& e)
+{
+    if (! dragging || ! gesture) return;
+    const auto delta = e.position - dragStart;
+    if (gestureMode == 1) gesture ("fieldStretch", juce::jlimit (.25f, 4.f, startX * std::pow (2.f, -delta.y / 60.f)), 1);
+    else if (gestureMode == 2) gesture ("fieldSplit", juce::jlimit (0.f,1.f,startX + delta.x / 160.f),1);
+    else { gesture ("fieldPosition", juce::jlimit (0.f,1.f,startX + delta.x / (getWidth() * .6f)),1); gesture ("fieldPitch", juce::jlimit (-24.f,24.f,startY - delta.y / 4.f),1); }
+}
+void FieldDisplay::mouseUp (const juce::MouseEvent&)
+{
+    if (! dragging || ! gesture) return;
+    dragging = false; gesture (gestureMode == 1 ? "fieldStretch" : gestureMode == 2 ? "fieldSplit" : "fieldPosition", 0.f, 2);
+    if (gestureMode == 0) gesture ("fieldPitch",0.f,2);
+}
+void FieldDisplay::mouseDoubleClick (const juce::MouseEvent& event)
+{
+    if (! gesture) return;
+    if (dragging) mouseUp (event);
+    for (const auto* id : { "fieldPosition", "fieldPitch", "fieldStretch", "fieldSplit" })
+    { gesture (id,0.f,0); gesture (id,juce::String (id) == "fieldStretch" ? 1.f : 0.f,1); gesture (id,0.f,2); }
 }
 
 void FieldDisplay::paint (juce::Graphics& g)
@@ -539,9 +570,9 @@ void FieldDisplay::paint (juce::Graphics& g)
             return juce::Point<float> (plot.getX() + phase * plot.getWidth(), plot.getBottom() - level * plot.getHeight());
         };
         juce::Path envelope;
-        envelope.startNewSubPath (envelopePoint (0.0f, motefield::shapeEnvelopePower (shape)));
+        envelope.startNewSubPath (envelopePoint (0.0f, juce::jlimit (.2f, 6.f, motefield::shapeEnvelopePower (shape) + (frame.tension - .5f) * 3.f)));
         for (int point = 1; point <= 80; ++point)
-            envelope.lineTo (envelopePoint (static_cast<float> (point) / 80.0f, motefield::shapeEnvelopePower (shape)));
+            envelope.lineTo (envelopePoint (static_cast<float> (point) / 80.0f, juce::jlimit (.2f, 6.f, motefield::shapeEnvelopePower (shape) + (frame.tension - .5f) * 3.f)));
         g.setColour (colour.withAlpha (.7f));
         g.strokePath (envelope, juce::PathStrokeType (1.5f * s));
         envelope.closeSubPath();
@@ -601,7 +632,10 @@ MoteFieldAudioProcessorEditor::MoteFieldAudioProcessorEditor (MoteFieldAudioProc
     modeSelector.setTooltip ("Effect mode. Click a name or turn the selector.");
     addAndMakeVisible (modeSelector);
     modeAttachment = std::make_unique<SliderAttachment> (processor.parameters, mode, modeSelector);
+    fieldDisplay.setComponentID ("field");
     addAndMakeVisible (fieldDisplay);
+    fieldDisplay.gesture = [this] (const char* id, float v, int stage)
+    { if (auto* p = processor.parameters.getParameter (id)) { if (stage == 0) p->beginChangeGesture(); else if (stage == 2) p->endChangeGesture(); else p->setValueNotifyingHost (p->convertTo0to1 (v)); } };
     addAndMakeVisible (looperTape);
     addKnob ("ACTIVITY", density, "Activity: changes how often fragments appear and overlap.");
     addKnob ("SHAPE", shape, "Shape: changes the volume contour of each fragment.");
@@ -653,7 +687,10 @@ MoteFieldAudioProcessorEditor::MoteFieldAudioProcessorEditor (MoteFieldAudioProc
     };
     attachButton (reverse, reverseButton);
     attachButton (motefield::parameter::sync, syncButton);
-    attachButton (freeze, holdButton);
+    holdButton.setComponentID ("freeze");
+    holdButton.setClickingTogglesState (false);
+    holdButton.onClick = [this] { if (value ("holdStyle") < .5f) processor.setParameterValue ("freeze", value ("freeze") > .5f ? 0.f : 1.f); };
+    holdButton.onStateChange = [this] { if (value ("holdStyle") > .5f) { const bool down = holdButton.isDown(); if (down != momentaryHoldDown) { momentaryHoldDown = down; processor.setParameterValue ("freeze", down ? 1.f : 0.f); } } };
     attachButton (bypass, bypassButton);
     setupButton (recordButton, "REC", "Start a new phrase, up to 60 seconds.", false, 3);
     setupButton (playButton, "PLAY", "Close a recording, finish overdubbing, or resume a stopped phrase.", false, 3);
@@ -684,6 +721,9 @@ MoteFieldAudioProcessorEditor::MoteFieldAudioProcessorEditor (MoteFieldAudioProc
     setupButton (detailsButton, "DETAILS +", "Show drift, resonance, output, reverb character, and loop speed.", true, 4);
     detailsButton.setComponentID ("details");
     detailsButton.onClick = [this] { setDetailsOpen (detailsButton.getToggleState()); };
+    setupButton (performanceButton, "PERFORM", "Loop, material, sidechain, pattern and MIDI controls.");
+    performanceButton.setComponentID ("perform");
+    performanceButton.onClick = [this] { if (! performancePanel) { performancePanel = std::make_unique<PerformancePanel> (processor); addAndMakeVisible (*performancePanel); } performancePanel->setBounds (getLocalBounds().reduced (14)); performancePanel->setVisible (true); performancePanel->toFront (true); };
     setupButton (motionButton, "LESS MOTION", "Keep the liquid voices in fixed positions while their size follows the sound.", true);
     motionButton.onClick = [this] { fieldDisplay.setReducedMotion (motionButton.getToggleState()); };
     setupCombo (presetBox, {}, "Factory and User presets. Loop audio, Hold and Bypass are retained.");
@@ -726,7 +766,7 @@ MoteFieldAudioProcessorEditor::MoteFieldAudioProcessorEditor (MoteFieldAudioProc
     startTimerHz (60);
 }
 
-MoteFieldAudioProcessorEditor::~MoteFieldAudioProcessorEditor() { stopTimer(); setLookAndFeel (nullptr); }
+MoteFieldAudioProcessorEditor::~MoteFieldAudioProcessorEditor() { stopTimer(); if (momentaryHoldDown) processor.setParameterValue ("freeze",0.f); setLookAndFeel (nullptr); }
 void MoteFieldAudioProcessorEditor::setupButton (juce::TextButton& button, const juce::String& name,
                                                const juce::String& help, bool toggles, int style)
 {
@@ -922,6 +962,7 @@ void MoteFieldAudioProcessorEditor::refreshDisplay()
     frame.mode = static_cast<motefield::Mode> (static_cast<int> (value (mode)));
     frame.variation = static_cast<int> (value (variation));
     frame.held = value (freeze) > .5f;
+    holdButton.setToggleState (frame.held, juce::dontSendNotification);
     frame.reverse = value (reverse) > .5f;
     frame.bypass = value (bypass) > .5f;
     fieldDisplay.setSampleRate (processor.getSampleRate());
@@ -936,6 +977,7 @@ void MoteFieldAudioProcessorEditor::refreshDisplay()
     const auto empty = state == motefield::LooperState::empty, recording = state == motefield::LooperState::recording;
     const auto playing = state == motefield::LooperState::playing, dubbing = state == motefield::LooperState::overdubbing;
     recordButton.setEnabled (empty || recording);
+    recordButton.setButtonText (frame.loopPending ? "ARMED" : "REC");
     recordButton.setToggleState (recording, juce::dontSendNotification);
     playButton.setEnabled (! empty);
     playButton.setToggleState (playing, juce::dontSendNotification);
@@ -968,6 +1010,8 @@ void MoteFieldAudioProcessorEditor::resized()
     };
     if (! hardwarePanel.isValid() || hardwarePanel.getHeight() != (detailsOpen ? 990 : 800)) hardwarePanel = makeHardwarePanel (detailsOpen ? 990 : 800);
     for (int i = 0; i < 8; ++i) place (*knobs[static_cast<std::size_t> (i)], 50 + (i % 4) * 183, i < 4 ? 106 : 265, 153, 143);
+    if (performancePanel) performancePanel->setBounds (getLocalBounds().reduced (14));
+    place (performanceButton, 628, 420, 110, 30);
     place (syncButton, 62, 420, 94, 30);
     place (timeValueLabel, 157, 420, 62, 30);
     timeValueLabel.setFont (font (13.0f * s, true));
@@ -1058,6 +1102,6 @@ void MoteFieldAudioProcessorEditor::paint (juce::Graphics& g)
         text (g, "LOOP SPEED", { 992, 810, 160, 18 }, 8, muted, true);
         text (g, "SUBDIVISION", { 805, 881, 160, 18 }, 8, muted, true);
         text (g, "DISPLAY", { 992, 881, 160, 18 }, 8, muted, true);
-        text (g, "Loop audio is temporary. Record your performance to a track before closing the session.", { 50, 961, 1140, 18 }, 10, muted);
+        text (g, "Loops save with your project. Open Perform for capture, export, material and MIDI controls.", { 50, 961, 1140, 18 }, 10, muted);
     }
 }
