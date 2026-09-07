@@ -2,11 +2,18 @@
 """Render reproducible wet/dry promos from the native 0.3.3 processor/editor."""
 import argparse,json,pathlib,subprocess
 ROOT=pathlib.Path(__file__).resolve().parents[1]
-p=argparse.ArgumentParser();p.add_argument('--clip',choices=['fantasy','rnb','looper','all'],default='all');p.add_argument('--audio-only',action='store_true');args=p.parse_args()
-out=ROOT/'Design/Promo-0.3.3-v2';out.mkdir(parents=True,exist_ok=True)
-for clip in (['fantasy','rnb','looper'] if args.clip=='all' else [args.clip]):
+p=argparse.ArgumentParser();p.add_argument('--clip',choices=['arp-1','arp-2','piano-1','piano-2','looper','all'],default='all');p.add_argument('--audio-only',action='store_true');args=p.parse_args()
+out=ROOT/'Design/Promo-0.3.3-v4';out.mkdir(parents=True,exist_ok=True)
+for clip in (['arp-1','arp-2','piano-1','piano-2','looper'] if args.clip=='all' else [args.clip]):
     stem='motefield-'+clip
-    cmd=[str(ROOT/'build-macos/Release/MoteFieldPromo'),str(out),clip]
+    arp=clip.startswith('arp')
+    source=ROOT/'Design/Promo-0.3.3-v2'/('OS_UMS_133_synth_arp_melody_closure_C#m.wav' if arp else 'DBM_LV_91_Piano_Loop_Hope_G#min.wav')
+    prepared=out/('input-arp-48k.wav' if arp else 'input-piano-48k.wav')
+    if not prepared.exists():
+        subprocess.run(['ffmpeg','-v','error','-y','-i',str(source),'-ar','48000','-ac','2','-c:a','pcm_f32le',str(prepared)],check=True)
+    bpm=133 if arp else 91
+    presets={'arp-1':'12,0,5','arp-2':'16,20,6','piano-1':'8,1,18','piano-2':'11,19,29','looper':'1,18'}[clip]
+    cmd=[str(ROOT/'build-macos/Release/MoteFieldPromo'),str(out),clip,str(prepared),str(bpm),presets]
     with (out/(stem+'-render.log')).open('w') as log:
         if args.audio_only:
             subprocess.run(cmd+['--audio-only'],stdout=subprocess.DEVNULL,stderr=log,check=True);continue
@@ -16,9 +23,12 @@ for clip in (['fantasy','rnb','looper'] if args.clip=='all' else [args.clip]):
         render.stdout.close();encoded=encode.wait();rendered=render.wait()
         if encoded or rendered:raise RuntimeError(f'{clip}: renderer={rendered}, encoder={encoded}; see {log.name}')
         final=out/(stem+'-1080p.mp4')
-        subprocess.run(['ffmpeg','-hide_banner','-loglevel','warning','-y','-i',str(silent),'-i',str(out/(stem+'.wav')),'-map','0:v:0','-map','1:a:0','-c:v','copy','-af',f"volume={1.5 if clip=='fantasy' else 3.0}dB",'-c:a','aac','-b:a','256k','-ar','48000','-movflags','+faststart','-shortest','-metadata','artist=Rango Labs','-metadata','title=MoteField / '+clip,'-metadata','comment=Original composition and native MoteField 0.3.3 processor/editor capture. One constant delivery gain across dry and processed sections.',str(final)],stderr=log,check=True)
+        subprocess.run(['ffmpeg','-hide_banner','-loglevel','warning','-y','-i',str(silent),'-i',str(out/(stem+'.wav')),'-map','0:v:0','-map','1:a:0','-c:v','copy','-c:a','aac','-b:a','256k','-ar','48000','-movflags','+faststart','-shortest','-metadata','artist=Rango Labs','-metadata','title=MoteField / '+clip,'-metadata','comment=User-provided source audio and native MoteField 0.3.3 processor/editor capture. One constant delivery gain across dry and processed sections.',str(final)],stderr=log,check=True)
         probe=json.loads(subprocess.check_output(['ffprobe','-v','error','-show_streams','-show_format','-of','json',str(final)]))
-        seconds={'fantasy':60,'rnb':57.6,'looper':48}[clip]
+        source_info=json.loads(subprocess.check_output(['ffprobe','-v','error','-show_entries','stream=duration_ts,time_base','-of','json',str(prepared)]))['streams'][0]
+        source_samples=int(source_info['duration_ts'])
+        import math
+        seconds=math.ceil((source_samples*4+(48000*2 if clip=='looper' else 48000*6+24000))/1600)/30
         assert abs(float(probe['format']['duration'])-seconds)<.1
         assert final.stat().st_size<220_000_000
         assert any(s['codec_type']=='audio' for s in probe['streams'])

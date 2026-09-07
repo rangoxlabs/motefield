@@ -23,11 +23,15 @@ Restores the voice-driven implicit fluid surface in place of the incorrectly ret
 - ZIP SHA-256: `ab434e8e915b7bc5019df790684865ca969f2398c4e993ed3eaab2865ccc66a0`.
 - Native Windows DAW playback and Windows ARM remain unqualified.
 
-### Promo revision 2
+### Full-phrase promos (revision 4)
 
-Three native processor/editor captures render at 1920 x 1080, 30 fps: fantasy (60 seconds), dark R&B (57.6 seconds), and looper (48 seconds). Each preset tour covers eight presets, with one bar dry and two bars processed. Checks confirm Mix is zero during dry sections and restored to the preset value for processed sections, and looper chapters enter the expected transport states.
+Rejected revision 3 exports and archives were deleted. The original supplied Closure arp and Hope piano WAVs remain unchanged by SHA-256. The earlier one-bar slicing schedule was replaced with complete-file passes and sample-accurate chapter boundaries. Native source counters and full-length waveform comparisons verify every source sample plays once per pass, including the endpoints. Video frame rounding no longer determines audio cut points.
 
-Each comparison repeats an identical source bar; all eight pairs in each tour have measurable processed-audio differences. Encoded AAC true peaks are -7.7 dBFS for fantasy and -2.0 dBFS for R&B and looper. Individual videos are below 6 MB, and the three-video archive is 15.8 MB. These are offline captures with editorial labels, not real-time screen recordings.
+Four preset tours cover six presets per source, with three presets and a complete dry reference in each video. Each processed pass includes two seconds for the effects to decay. All 32 factory presets were rendered against both full sources and measured for finite output, headroom, transient steps, stereo energy, and contrast; selections favor octave-compatible layers and distinct rhythmic/textural roles. These measurements are not subjective listening approval.
+
+The replacement looper performance records the complete piano phrase in PRE-FX at Mix 0%, then turns off the original input. It plays the recording through Soft Focus and Moon Pool and performs a gradual filter/space/shape swell. The captured file contains exactly 1,012,748 samples at 48 kHz, matching the resampled source length; its interior sample error against the clean source at capture gain is below 1.2e-7. Loop playback stops only after the final full pass, followed by a two-second tail.
+
+All five videos are 1920 x 1080 at 30 fps. Arp tours run 64.24 seconds each, piano tours 90.90 seconds each, and the PRE-FX performance 86.40 seconds. Encoded true peaks are -3.0 dBFS for arp and -3.6 dBFS for piano and looper. Each video is below 12 MB; the verified five-video ZIP is 38.9 MB. Native Mix/transport checks and the full-file checks in `scripts/package-promos.py` passed. Captures are offline native processor/editor renders with editorial labels.
 
 
 ## Version 0.3.2
