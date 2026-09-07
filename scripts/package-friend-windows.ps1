@@ -33,6 +33,8 @@ try {
     Add-Content "$test/$name/Plug-ins/MoteField.vst3/Contents/x86_64-win/MoteField.vst3" 'corruption-test'
     & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $script -TestRoot "$work/Rejected"
     if ($LASTEXITCODE -eq 0 -or (Test-Path "$work/Rejected")) { throw 'Modified payload was not rejected' }
+    # Clear the expected failure from the negative test for the CI shell.
+    $global:LASTEXITCODE = 0
     $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
     "$hash  $name.zip" | Set-Content -Encoding ascii "$zip.sha256"
     Write-Host "Created and verified $zip (fresh install, backup, binary hash, corrupt-payload rejection)"

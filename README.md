@@ -178,10 +178,14 @@ Use Visual Studio with Desktop development with C++, CMake, and Git. From a deve
 
 ```powershell
 ./scripts/build-windows.ps1
+./scripts/package-friend-windows.ps1
+# Optional .exe installer:
 ./scripts/package-windows.ps1 -Unsigned
 ```
 
-Packaging also requires PowerShell 7 and Inno Setup 6.3 or newer. The installer targets `C:\Program Files\Common Files\VST3\MoteField.vst3` and includes an uninstaller. Windows x64 builds and installers are configured in [GitHub Actions](.github/workflows/build.yml); native Windows DAW testing remains pending.
+The direct-install ZIP packages the Windows VST3, checksums, `Install.cmd`, `Install.ps1`, and `START HERE.txt`. Extract it, quit the DAW, run `Install.cmd`, and approve the administrator prompt. The script checks the payload and backs up an older MoteField copy before installing in the standard system VST3 folder. A manual-copy alternative is documented in the ZIP.
+
+Packaging uses PowerShell 7; the optional `.exe` also requires Inno Setup 6.3 or newer. The installer targets `C:\Program Files\Common Files\VST3\MoteField.vst3` and includes an uninstaller. Windows x64 builds and installers are configured in [GitHub Actions](.github/workflows/build.yml); native Windows DAW testing remains pending.
 
 ### Linux
 
