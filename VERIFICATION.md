@@ -40,7 +40,7 @@ The 0.2.6 kit was extracted, marked with simulated browser quarantine, installed
 
 ## Platform and release limits
 
-- The previous 0.2.6 GitHub Actions run passed on macOS and Windows. The expanded 0.3.0 Windows build and native DAW testing remain to be verified.
+- The 0.3.0 GitHub Actions [build run](https://github.com/rangoxlabs/motefield/actions/runs/34070320230) passed on macOS and Windows at commit 8708259. Both platforms compiled, passed the DSP tests, and produced installer artifacts; macOS also produced the direct-install test ZIP. Native Windows DAW playback remains to be verified.
 - Live controller routing, automation recording/playback, MIDI preset changes, and external WAV dragging need hands-on checks in each supported DAW.
 - Continuous speed is varispeed: it changes pitch. Tempo changes after recording do not automatically time-stretch a phrase to the new tempo.
 - Scales constrain grain transposition using a manually supplied source note; this is not polyphonic pitch correction.
