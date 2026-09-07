@@ -74,6 +74,7 @@ public:
     double getEffectiveBpm() const noexcept { return effectiveBpm.load(); }
     bool isReceivingHostTempo() const noexcept { return receivingHostTempo.load(); }
     void setParameterValue (const char* id, float value);
+    void randomizeSound (juce::int64 seed);
     void applyFactoryPreset (int index);
     static juce::StringArray factoryPresetNames();
     juce::Result exportAudio (const juce::File&, int historyBars = 0);

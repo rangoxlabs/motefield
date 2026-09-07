@@ -36,46 +36,23 @@ void text (juce::Graphics& g, const juce::String& value, juce::Rectangle<float> 
     g.setFont (font (size, bold, tracking));
     g.drawText (value, area, justification, false);
 }
-juce::Image makeHardwarePanel (int height)
+juce::Image makeHardwarePanel (int height, const appearance::Palette& p)
 {
-    juce::Image image (juce::Image::RGB, 1240, height, true);
-    juce::Graphics g (image);
-    g.fillAll (ink);
-    const juce::Rectangle<float> panel (5.f, 5.f, 1230.f, static_cast<float> (height) - 10.f);
-    g.setGradientFill (juce::ColourGradient (juce::Colour (0xfff0e7d0), 35, 0, juce::Colour (0xffd6ceb7), 1220, static_cast<float> (height), false));
-    g.fillRoundedRectangle (panel, 24.f);
+    juce::Image image (juce::Image::RGB,1620,height,true);
+    juce::Graphics g(image);
+    g.fillAll(p.paper);
+    const auto enclosure=juce::ImageCache::getFromMemory(BinaryData::AcidEnclosurev1_png,BinaryData::AcidEnclosurev1_pngSize);
+    g.drawImage(enclosure,juce::Rectangle<float>(0,0,1620,972));
+    // Dark finish keeps the same physical enclosure and panel geometry.
+    if(p.paper.getBrightness()<.5f)
     {
-        juce::Graphics::ScopedSaveState clip (g);juce::Path shape;shape.addRoundedRectangle (panel, 24.f);g.reduceClipRegion (shape);
-        if (const auto pattern = juce::Drawable::createFromImageData (BinaryData::HardwarePrint_svg, BinaryData::HardwarePrint_svgSize))
-            pattern->drawWithin (g, { 5.f, 5.f, 1230.f, 790.f }, juce::RectanglePlacement::stretchToFit, 1.f);
-        juce::Random grain (87102);
-        for (int i = 0; i < 45000; ++i)
-        {
-            g.setColour ((i % 2 ? ink : paper.brighter (.25f)).withAlpha (.035f));
-            g.fillRect (grain.nextFloat() * 1240.f, grain.nextFloat() * height, .65f, .65f);
-        }
+        g.setColour(juce::Colour(0xff111a22).withAlpha(.65f));
+        g.fillRoundedRectangle({31,25,1555,73},30);
+        juce::Path rail;rail.startNewSubPath(328,116);rail.quadraticTo(339,80,391,86);rail.lineTo(1220,86);rail.quadraticTo(1310,103,1260,170);rail.lineTo(1155,215);rail.lineTo(477,218);rail.quadraticTo(369,212,328,151);rail.closeSubPath();g.fillPath(rail);
+        g.fillRoundedRectangle({213,580,1290,120},50);
     }
-    g.setColour (paper.brighter (.18f).withAlpha (.75f));g.drawRoundedRectangle (panel.reduced (4), 21.f, 2.f);
-    g.setColour (muted.withAlpha (.55f));g.drawRoundedRectangle (panel.reduced (8), 18.f, 1.f);
-    // Recessed control and transport plates leave the print on the enclosure.
-    for (const auto plate : { juce::Rectangle<float> (793, 112, 405, 365), juce::Rectangle<float> (40, 690, 1160, 77) })
-    {
-        g.setColour (paper);g.fillRoundedRectangle (plate, 13.f);
-        g.setColour (line.withAlpha (.85f));g.drawRoundedRectangle (plate.reduced (4), 10.f, 1.f);
-    }
-    g.setColour (line);g.drawLine (811, 434, 1180, 434, .8f);
-    if (height > 800)
-    {
-        g.setColour (paper);g.fillRoundedRectangle ({ 40, 802, 1160, 151 }, 12.f);
-        g.setColour (line);g.drawRoundedRectangle ({ 44, 806, 1152, 143 }, 9.f, .8f);
-    }
-    for (const juce::Point<float> c : { juce::Point<float> (24, 24), { 1216, 24 }, { 24, static_cast<float> (height - 24) }, { 1216, static_cast<float> (height - 24) } })
-    {
-        g.setColour (ink.withAlpha (.2f));g.fillEllipse (c.x-9,c.y-7,18,18);
-        g.setGradientFill (juce::ColourGradient (juce::Colour (0xffe0e1c7), c.x-6,c.y-8,juce::Colour (0xff636e58),c.x+7,c.y+8,false));
-        g.fillEllipse (c.x-8,c.y-8,16,16);g.setColour (ink);g.drawEllipse (c.x-8,c.y-8,16,16,1);
-        g.drawLine (c.x-4,c.y-2,c.x+4,c.y+2,2.f);
-    }
+    if(height>972)
+    { g.setColour(p.paper);g.fillRoundedRectangle({32,984,1556,220},20);g.setColour(p.line);g.drawRoundedRectangle({36,988,1548,212},17,1); }
     return image;
 }
 
@@ -86,8 +63,20 @@ juce::String secondsText (float seconds)
 }
 }
 
-MoteFieldLookAndFeel::MoteFieldLookAndFeel()
+MoteFieldLookAndFeel::MoteFieldLookAndFeel() { setAppearance (false, juce::Colour (appearance::acid)); }
+void MoteFieldLookAndFeel::setAppearance (bool dark, juce::Colour accent)
 {
+    colours = appearance::palette (dark, accent);
+    const auto [paper, ink, muted, line, blue, cyan, coral, yellow, mint] = colours;
+    const std::array<juce::Colour,9> values { paper,ink,muted,line,blue,cyan,coral,yellow,mint };
+    for (int i=0;i<9;++i) setColour (appearance::baseId+i,values[i]);
+    setColour (juce::Slider::thumbColourId, cyan);
+    setColour (juce::Slider::trackColourId, cyan);
+    setColour (juce::TextEditor::textColourId, ink);
+    setColour (juce::TextEditor::backgroundColourId, paper);
+    setColour (juce::TextEditor::highlightColourId, cyan.withAlpha (.3f));
+    setColour (juce::AlertWindow::backgroundColourId, paper);
+    setColour (juce::AlertWindow::textColourId, ink);
     setColour (juce::PopupMenu::backgroundColourId, paper);
     setColour (juce::PopupMenu::textColourId, ink);
     setColour (juce::PopupMenu::highlightedBackgroundColourId, blue.withAlpha (.12f));
@@ -105,55 +94,64 @@ MoteFieldLookAndFeel::MoteFieldLookAndFeel()
 void MoteFieldLookAndFeel::drawRotarySlider (juce::Graphics& g, int x, int y, int width, int height,
                                             float position, float start, float end, juce::Slider& slider)
 {
-    const auto size = static_cast<float> (juce::jmin (width, height));
-    const juce::Point<float> centre (static_cast<float> (x) + width * .5f, static_cast<float> (y) + height * .5f);
-    const auto radius = size * .405f, angle = start + position * (end - start);
-    const auto body = juce::Rectangle<float> (radius * 2, radius * 2).withCentre (centre);
-    for (int i = 5; i > 0; --i)
+    const auto [paper, ink, muted, line, blue, cyan, coral, yellow, mint] = colours;
+    const auto size=static_cast<float>(juce::jmin(width,height));
+    const juce::Point<float> centre(x+width*.5f,y+height*.5f);
+    const bool selector=slider.getComponentID()=="mode-selector";
+    const auto radius=size*(selector?.35f:.405f),angle=start+position*(end-start);
+    if(selector)
     {
-        g.setColour (ink.withAlpha (.035f));
-        g.fillEllipse (body.expanded (static_cast<float> (i)).translated (0, size * .035f));
+        for(int tick=0;tick<=30;++tick)
+        {
+            const auto a=start+(end-start)*tick/30.f;
+            g.setColour(juce::Colours::white.withAlpha(tick%3==0?.75f:.30f));
+            g.drawLine({centre.getPointOnCircumference(size*(tick%3==0?.435f:.465f),a),centre.getPointOnCircumference(size*.49f,a)},juce::jmax(.6f,size*.005f));
+        }
+        const auto point=centre.getPointOnCircumference(size*.432f,angle);
+        g.setGradientFill(juce::ColourGradient(cyan.withAlpha(.55f),point.x,point.y,cyan.withAlpha(0.f),point.x+size*.05f,point.y,true));g.fillEllipse(juce::Rectangle<float>(size*.10f,size*.10f).withCentre(point));
+        g.setColour(cyan);g.fillEllipse(juce::Rectangle<float>(size*.027f,size*.027f).withCentre(point));
     }
-    g.setColour (muted.withAlpha (.4f));g.drawEllipse (body.expanded (size * .045f), 1.f);
-    g.setGradientFill (juce::ColourGradient (juce::Colour (0xff383b2e), body.getX(), body.getY(), ink, body.getRight(), body.getBottom(), false));
-    g.fillEllipse (body);
-    for (int i = 0; i < 64; ++i)
+    else
     {
-        const auto a = i * pi * 2.f / 64.f;
-        g.setColour (juce::Colour (0xffa39e82).withAlpha (i % 2 ? .40f : .62f));
-        g.drawLine ({ centre.getPointOnCircumference (radius * .84f, a), centre.getPointOnCircumference (radius * .97f, a) }, size * .010f);
+        const auto origin=centre.translated(0,size*.40f);
+        g.setGradientFill(juce::ColourGradient(cyan.withAlpha(.42f),origin.x,origin.y,cyan.withAlpha(0.f),origin.x+size*.43f,origin.y,true));
+        g.fillEllipse(juce::Rectangle<float>(size*.96f,size*.24f).withCentre(origin));
+        juce::Path light;light.addCentredArc(centre.x,centre.y+size*.065f,radius,radius,0,pi*.30f,pi*1.70f,true);
+        for(int glow=8;glow>0;--glow){g.setColour(cyan.withAlpha(.023f));g.strokePath(light,juce::PathStrokeType(glow*size*.015f));}
+        g.setColour(cyan.brighter(.15f));g.strokePath(light,juce::PathStrokeType(size*.015f));
     }
-    const auto face = body.reduced (radius * .20f).translated (0, -size * .008f);
-    g.setGradientFill (juce::ColourGradient (juce::Colour (0xfff5efd7), face.getX(), face.getY(), juce::Colour (0xffcec5a8), face.getRight(), face.getBottom(), false));
-    g.fillEllipse (face);g.setColour (juce::Colour (0xfffaf4da).withAlpha (.8f));g.drawEllipse (face.reduced (1.f), 1.3f);
-    g.setColour (ink.withAlpha (.3f));g.drawEllipse (face, .7f);
-    const auto c = face.getCentre();
-    juce::Path pointer;pointer.startNewSubPath (c.getPointOnCircumference (radius * .44f, angle));pointer.lineTo (c.getPointOnCircumference (radius * .70f, angle));
-    g.setColour (ink);g.strokePath (pointer, juce::PathStrokeType (size * .043f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
-    if (slider.getComponentID() != "mode-selector" && slider.isMouseOverOrDragging())
-        text (g, slider.getTextFromValue (slider.getValue()), { body.getX(), c.y + radius * .32f, body.getWidth(), radius * .35f }, size * .10f, ink, true, juce::Justification::centred);
+    const auto knob=juce::ImageCache::getFromMemory(BinaryData::AcidKnobv1_png,BinaryData::AcidKnobv1_pngSize);
+    g.setImageResamplingQuality(juce::Graphics::highResamplingQuality);
+    g.drawImage(knob,juce::Rectangle<float>(size*(selector?.80f:.92f),size*(selector?.80f:.92f)).withCentre(centre.translated(0,size*(selector?.07f:.08f))));
+    if(!selector)
+    {
+        juce::Path lip;lip.addCentredArc(centre.x,centre.y+size*.045f,size*.435f,size*.435f,0,pi*.42f,pi*1.58f,true);
+        for(int halo=7;halo>0;--halo){g.setColour(cyan.withAlpha(.055f));g.strokePath(lip,juce::PathStrokeType(size*.012f*halo));}
+        g.setColour(cyan.interpolatedWith(juce::Colours::white,.55f));g.strokePath(lip,juce::PathStrokeType(size*.008f));
+    }
+    juce::Path pointer;pointer.startNewSubPath(centre.getPointOnCircumference(radius*.58f,angle));pointer.lineTo(centre.getPointOnCircumference(radius*.79f,angle));
+    g.setColour(juce::Colour(0xff202422));g.strokePath(pointer,juce::PathStrokeType(size*.026f,juce::PathStrokeType::curved,juce::PathStrokeType::rounded));
+    if(slider.getComponentID()!="mode-selector"&&slider.isMouseOverOrDragging())
+        text(g,slider.getTextFromValue(slider.getValue()),{centre.x-radius,centre.y+radius*.30f,radius*2,radius*.35f},size*.10f,juce::Colour(0xff202422),true,juce::Justification::centred);
 }
 
 void MoteFieldLookAndFeel::drawButtonBackground (juce::Graphics& g, juce::Button& button,
                                                 const juce::Colour&, bool hover, bool down)
 {
+    const auto [paper, ink, muted, line, blue, cyan, coral, yellow, mint] = colours;
     const auto style = static_cast<int> (button.getProperties()["style"]);
     const auto active = button.getToggleState();
     const auto bounds = button.getLocalBounds().toFloat();
     const auto scale = juce::jmax (.7f, static_cast<float> (button.getHeight()) / (style == 2 ? 114.0f : 34.0f));
-    if (style == 6)
+    if (style == 6 || button.getProperties()["utility"])
     {
-        const auto face = juce::Rectangle<float> (26.0f * scale, 26.0f * scale).withCentre ({ 16.0f * scale, bounds.getCentreY() });
-        auto colour = active ? button.findColour (juce::TextButton::buttonOnColourId) : paper;
-        if (hover) colour = colour.darker (.04f);
-        g.setColour (ink.withAlpha (.11f));
-        g.fillEllipse (face.translated (0.0f, 1.5f * scale));
-        g.setGradientFill (juce::ColourGradient (colour.brighter (.1f), face.getX(), face.getY(), colour.darker (.055f), face.getX(), face.getBottom(), false));
-        g.fillEllipse (face);
-        g.setColour (line);
-        g.drawEllipse (face, .8f);
-        g.setColour ((button.getComponentID() == "record" ? coral : ink).withAlpha (button.isEnabled() ? .9f : .22f));
-        const auto cx = face.getCentreX(), cy = face.getCentreY();
+        const auto face = bounds.reduced(3);
+        auto colour = active ? cyan.darker(.75f) : juce::Colour(0xff0e1110);
+        for(int halo=3;halo>0;--halo) if(active) {g.setColour(cyan.withAlpha(.12f));g.fillRoundedRectangle(face.expanded(halo),8);}
+        g.setGradientFill(juce::ColourGradient(colour.brighter(.07f),0,0,colour,0,bounds.getBottom(),false));g.fillRoundedRectangle(face,7);
+        g.setColour(active?cyan:juce::Colour(0xff555957));g.drawRoundedRectangle(face,7,1);
+        g.setColour(active?cyan:juce::Colour(0xffe9ede9));
+        const auto cx=bounds.getCentreX(), cy=bounds.getHeight()*.34f;
         const auto id = button.getComponentID();
         if (id == "record") g.fillEllipse (cx - 4.0f * scale, cy - 4.0f * scale, 8.0f * scale, 8.0f * scale);
         else if (id == "play")
@@ -177,6 +175,17 @@ void MoteFieldLookAndFeel::drawButtonBackground (juce::Graphics& g, juce::Button
             arrow.lineTo (cx - 1.0f * scale, cy + scale);
             g.strokePath (arrow, juce::PathStrokeType (1.1f * scale));
         }
+        else if(button.getProperties()["utility"])
+        {
+            const auto unit=5.f*scale;
+            if(id=="settings")
+            {for(int row=0;row<3;++row){const auto yy=cy+(row-1)*unit;g.drawLine(cx-unit,yy,cx+unit,yy,.9f*scale);const auto xx=cx+(row%2?-.35f:.35f)*unit;g.fillEllipse(xx-scale,yy-2*scale,2*scale,4*scale);}}
+            else if(id=="details")
+            {for(int dot=-1;dot<=1;++dot)g.drawEllipse(cx+dot*unit-scale,cy-scale,2*scale,2*scale,.8f*scale);}
+            else
+            {juce::Path arrows;arrows.startNewSubPath(cx-unit,cy-3*scale);arrows.lineTo(cx+unit,cy-3*scale);arrows.lineTo(cx+unit-3*scale,cy-6*scale);
+             arrows.startNewSubPath(cx+unit,cy+3*scale);arrows.lineTo(cx-unit,cy+3*scale);arrows.lineTo(cx-unit+3*scale,cy+6*scale);g.strokePath(arrows,juce::PathStrokeType(scale));}
+        }
         else
         {
             g.drawRoundedRectangle (cx - 3.0f * scale, cy - 2.0f * scale, 6.0f * scale, 7.0f * scale, scale, scale);
@@ -187,11 +196,7 @@ void MoteFieldLookAndFeel::drawButtonBackground (juce::Graphics& g, juce::Button
     }
     if (style == 1)
     {
-        if (active || hover)
-        {
-            g.setColour (active ? cyan : paper.darker (.04f));g.fillRoundedRectangle (bounds.reduced (.8f), 4.f);
-            g.setColour (active ? mint : line);g.drawRoundedRectangle (bounds.reduced (.8f), 4.f, .8f);
-        }
+        if(hover) {g.setColour(juce::Colours::white.withAlpha(.08f));g.fillRoundedRectangle(bounds,5);}
         return;
     }
     if (style == 3 || style == 4)
@@ -203,41 +208,54 @@ void MoteFieldLookAndFeel::drawButtonBackground (juce::Graphics& g, juce::Button
         }
         return;
     }
-    auto fill = active ? button.findColour (juce::TextButton::buttonOnColourId) : button.findColour (juce::TextButton::buttonColourId);
-    if (hover) fill = fill.brighter (.045f);
-    if (down) fill = fill.darker (.055f);
-    const auto face = bounds.reduced (3.0f * scale).withTrimmedBottom (down ? 0.0f : 2.0f * scale);
-    const auto radius = (style == 2 ? 12.0f : 5.0f) * scale;
-    if (style == 2 && active) { g.setColour (fill.withAlpha (.15f)); g.fillRoundedRectangle (bounds, radius + 2.0f); }
-    g.setColour (ink.withAlpha (.15f));
-    g.fillRoundedRectangle (face.translated (0.0f, 3.0f * scale), radius);
-    g.setGradientFill (juce::ColourGradient (fill.brighter (.16f), face.getX(), face.getY(), fill.darker (.06f), face.getX(), face.getBottom(), false));
-    g.fillRoundedRectangle (face, radius);
-    g.setColour (fill.darker (.22f));
-    g.drawRoundedRectangle (face, radius, 1.0f);
-    g.setColour (paper.brighter (.25f).withAlpha (.48f));
-    g.drawRoundedRectangle (face.reduced (2.0f * scale), radius - 2.0f * scale, 1.0f);
-    if (! button.isEnabled()) { g.setColour (paper.withAlpha (.6f)); g.fillRoundedRectangle (face, radius); }
+    const bool dark=button.getProperties()["darkControl"] || paper.getBrightness()<.5f;
+    auto fill=active?cyan:dark?juce::Colour(0xff191d1b):juce::Colour(0xffe8e9e4);
+    if(hover)fill=fill.brighter(.04f);
+    const auto edge=juce::jmax(.65f,scale*.65f);
+    const auto pocket=bounds.reduced(2*edge);
+    const auto radius=(style==2?13.f:8.f)*scale;
+    if(active||down)for(int halo=6;halo>0;--halo){g.setColour(cyan.withAlpha(.045f));g.fillRoundedRectangle(pocket.expanded(halo*.5f*edge),radius+halo*.5f*edge);}
+    g.setGradientFill(juce::ColourGradient(juce::Colour(0xff444942),0,pocket.getY(),juce::Colour(0xffc5c9c0),0,pocket.getBottom(),false));g.fillRoundedRectangle(pocket,radius);
+    g.setColour(juce::Colours::black.withAlpha(.8f));g.fillRoundedRectangle(pocket.reduced(2*edge),radius-2*edge);
+    const auto face=pocket.reduced(4*edge).translated(0,down?1.5f*edge:-edge);
+    g.setGradientFill(juce::ColourGradient(fill.brighter(.16f),face.getX(),face.getY(),fill.darker(.1f),face.getRight(),face.getBottom(),false));g.fillRoundedRectangle(face,radius-3*edge);
+    if(!dark&&!active)
+    {
+        juce::Graphics::ScopedSaveState texture(g);juce::Path clip;clip.addRoundedRectangle(face,radius-3*edge);g.reduceClipRegion(clip);g.setOpacity(.25f);
+        const auto enamel=juce::ImageCache::getFromMemory(BinaryData::AcidKnobv1_png,BinaryData::AcidKnobv1_pngSize);g.drawImage(enamel.getClippedImage({400,300,400,400}),face);
+    }
+    g.setColour(juce::Colours::white.withAlpha(dark?.16f:.8f));g.drawRoundedRectangle(face.reduced(edge),radius-4*edge,edge);
+    g.setColour(juce::Colours::black.withAlpha(.16f));g.drawRoundedRectangle(face,radius-3*edge,.7f*edge);
+    if(!button.isEnabled()){g.setColour(paper.withAlpha(.35f));g.fillRoundedRectangle(face,radius-3*edge);}
+
 }
 
 void MoteFieldLookAndFeel::drawButtonText (juce::Graphics& g, juce::TextButton& button, bool, bool)
 {
+    const auto [paper, ink, muted, line, blue, cyan, coral, yellow, mint] = colours;
     const auto style = static_cast<int> (button.getProperties()["style"]);
     auto bounds = button.getLocalBounds().toFloat();
-    const auto scale = static_cast<float> (style == 2 ? juce::jmin (button.getWidth(), button.getHeight()) : button.getHeight()) / (style == 2 ? 114.0f : style == 1 ? 32.0f : style == 5 ? 45.0f : 34.0f);
-    if (style == 6) bounds.removeFromLeft (32.0f * scale);
-    const auto colour = button.isEnabled() ? (style == 2 && button.getComponentID() != "freeze" && ! button.getToggleState() ? paper : style == 5 && button.getToggleState() ? paper : ink) : muted.withAlpha (.52f);
-    text (g, button.getButtonText(), bounds, (button.getProperties()["panelButton"] ? 12.5f : style == 2 || style == 5 ? 16.0f : style == 1 ? 13.0f : 11.0f) * scale,
-          colour, style != 1 || button.getToggleState(), style == 6 ? juce::Justification::centredLeft : juce::Justification::centred,
+    const auto scale = static_cast<float> (style == 2 ? juce::jmin (button.getWidth(), button.getHeight()) : button.getHeight()) / (style == 2 ? 83.0f : style == 1 ? 22.0f : style == 5 ? 45.0f : 34.0f);
+    const bool utility=button.getProperties()["utility"];
+    if (style == 6 || utility) bounds = bounds.withTrimmedTop(bounds.getHeight()*.61f).withTrimmedBottom(3);
+    const auto colour = !button.isEnabled() ? muted.withAlpha (.65f)
+        : style == 1 && button.getToggleState() ? cyan
+        : (style==6||utility) && button.getToggleState() ? cyan
+        : button.getToggleState() && style != 3 && style != 4 && style != 6 ? appearance::onAccent (cyan)
+        : (style == 1 && button.getProperties()["glassDark"]) || button.getProperties()["darkControl"] ? juce::Colour (0xffeff3f3) : ink;
+
+    text (g, button.getButtonText(), bounds, (button.getProperties()["panelButton"] ? 12.5f : style == 2 ? 14.0f : style == 5 ? 16.0f : style == 1 ? 12.5f : style == 6 || utility ? 7.5f : 11.0f) * scale,
+          colour, style == 5 || (style == 1 && button.getToggleState()), juce::Justification::centred,
           style == 1 ? 0.0f : .04f);
 }
 
 void MoteFieldLookAndFeel::drawComboBox (juce::Graphics& g, int width, int height, bool, int, int, int, int, juce::ComboBox&)
 {
+    const auto [paper, ink, muted, line, blue, cyan, coral, yellow, mint] = colours;
     const auto bounds = juce::Rectangle<float> (static_cast<float> (width), static_cast<float> (height)).reduced (.8f);
-    g.setColour (juce::Colour (0xffdaddbf));
+    g.setColour (paper);
     g.fillRoundedRectangle (bounds, 4.0f);
-    g.setColour (mint);
+    g.setColour (line);
     g.drawRoundedRectangle (bounds, 4.0f, 1.8f);
     const auto cx = bounds.getRight() - 13.0f, cy = bounds.getCentreY();
     juce::Path arrow;
@@ -264,8 +282,9 @@ ParameterKnob::ParameterKnob (const juce::String& name, const juce::String& desc
 void ParameterKnob::resized() { slider.setBounds (getLocalBounds().withTrimmedBottom (juce::roundToInt (static_cast<float> (getHeight()) * .17f))); }
 void ParameterKnob::paint (juce::Graphics& g)
 {
+    const auto [paper, ink, muted, line, blue, cyan, coral, yellow, mint] = appearance::read (*this);
     const auto h = static_cast<float> (getHeight());
-    text (g, title, { 0.0f, h * .83f, static_cast<float> (getWidth()), h * .17f }, h * .097f, ink, true, juce::Justification::centred, .055f);
+    text (g, title, { 0.0f, h * .83f, static_cast<float> (getWidth()), h * .17f }, h * .113f, ink, false, juce::Justification::centred, .01f);
 }
 
 void FieldDisplay::update (const motefield::VisualFrame& next)
@@ -364,7 +383,7 @@ void FieldDisplay::update (const motefield::VisualFrame& next)
         weight += voice.energy;meanX += voice.x * voice.energy;meanY += voice.y * voice.energy;
     }
     const auto targetX = 240.f + (weight > .001f && ! reducedMotion ? (meanX / weight - .5f) * 45.f : 0.f) + (reducedMotion ? 0.f : (next.fieldPosition * 2.f - next.fieldSplit) * 55.f);
-    const auto targetY = 72.f + (weight > .001f && ! reducedMotion ? (meanY / weight - .5f) * 22.f : 0.f) - (reducedMotion ? 0.f : next.fieldPitch * .6f);
+    const auto targetY = juce::jlimit (65.f, 79.f, 72.f + (weight > .001f && ! reducedMotion ? (meanY / weight - .5f) * 22.f : 0.f) - (reducedMotion ? 0.f : next.fieldPitch * .6f));
     centreX += (targetX - centreX) * (1.f - std::exp (-dt * 14.f));
     centreY += (targetY - centreY) * (1.f - std::exp (-dt * 14.f));
     const auto spring = [dt] (float& position, float& velocity, float destination, float speed)
@@ -384,12 +403,12 @@ void FieldDisplay::update (const motefield::VisualFrame& next)
         const auto amount = 1.f - std::exp (-cluster.energy * 1.6f);
         const auto alive = cluster.energy > .0001f;
         const auto tx = alive ? cluster.x / cluster.energy * liquidWidth : centreX;
-        const auto ty = alive ? cluster.y / cluster.energy * liquidHeight : centreY;
+        const auto ty = alive ? cluster.y / cluster.energy * 144.f : centreY;
         const auto spread = (.35f + .65f * amount) * (1.5f - next.cohesion) + next.fieldSplit * .35f;
         const auto x = reducedMotion ? 95.f + i * 72.f : centreX + (tx - centreX) * spread;
         const auto y = reducedMotion ? 72.f : centreY + (ty - centreY) * spread;
-        spring (body.x, body.vx, juce::jlimit (55.f, liquidWidth - 55.f, x), 30.f - next.viscosity * 20.f);
-        spring (body.y, body.vy, juce::jlimit (43.f, liquidHeight - 43.f, y), 30.f - next.viscosity * 20.f);
+        spring (body.x, body.vx, juce::jlimit (104.f, liquidWidth - 104.f, x), 30.f - next.viscosity * 20.f);
+        spring (body.y, body.vy, juce::jlimit (43.f, 144.f - 43.f, y), 30.f - next.viscosity * 20.f);
         spring (body.radius, body.vr, 27.f * std::sqrt (amount), 28.f);
         spring (body.stretch, body.vs, alive && ! reducedMotion ? juce::jlimit (.7f,1.4f, std::sqrt (next.fieldStretch)) + cluster.bend / cluster.energy * .4f : 1.f, 24.f);
     }
@@ -408,10 +427,20 @@ void FieldDisplay::renderLiquid()
     // All bodies contribute to one implicit surface. Shared normals remove
     // draw-order seams when grains join, split or move through one another.
     liquidField.fill (0.f);liquidHeat.fill (0.f);liquidGradientY.fill (0.f);
-    const float blend = std::pow (12.f + frame.cohesion * 12.f, 2.f);
-    const auto deposit = [this, blend] (float cx, float cy, float radius, float stretch, float strength = 1.f)
+    const auto accent=appearance::read(*this).cyan;
+    const auto area=getLocalBounds().toFloat().reduced(1.f);
+    const auto view=area.reduced(16.f*area.getWidth()/718.f,14.f*area.getWidth()/718.f);
+    const float pixelAspect=(view.getWidth()*.69f*.95f/liquidWidth)/(view.getHeight()/liquidHeight);
+    const float blend = std::pow (16.f + frame.cohesion * 12.f, 2.f);
+    const auto deposit = [this, blend, pixelAspect] (float cx, float cy, float radius, float stretch, float strength = 1.f)
     {
-        const auto ax = 1.f / stretch, ay = stretch;
+        const auto ax = 1.f / stretch, ay = stretch / pixelAspect;
+        // Retain the engine's original 480 x 144 motion space, while shading
+        // round volumes in the actual display's aspect ratio.
+        cx=240.f+(cx-240.f)*1.12f; cy=120.f+(cy-72.f)*1.8f;
+        radius=juce::jmin(radius,(liquidHeight*.5f-14.f)*ay);
+        cx=juce::jlimit(radius/ax+14.f,liquidWidth-radius/ax-14.f,cx);
+        cy=juce::jlimit(radius/ay+14.f,liquidHeight-radius/ay-14.f,cy);
         const auto reach = std::sqrt (radius * radius + blend * 8.f);
         const auto left = juce::jmax (0, static_cast<int> (cx - reach / ax));
         const auto right = juce::jmin (liquidWidth - 1, static_cast<int> (cx + reach / ax) + 1);
@@ -438,7 +467,11 @@ void FieldDisplay::renderLiquid()
         }
     };
     // The main mass responds to frequency content, not only a slow peak meter.
-    const auto radius = 32.f + lowDrive * 8.f + midDrive * 3.f;
+    float activeVolume=0.f;
+    for(const auto& body:surfaceBodies) activeVolume+=body.radius;
+    // Give active fragments room to reshape the core instead of hiding them
+    // inside an oversized permanent sphere. The mass reunites when they decay.
+    const auto radius = 58.f - juce::jmin(20.f,activeVolume*.18f) + lowDrive * 18.f + midDrive * 8.f;
     deposit (centreX, centreY, radius, reducedMotion ? 1.f : 1.f + lowDrive * .24f - midDrive * .22f);
     const auto tension = reducedMotion ? 0.f : (midDrive * .65f + highDrive * .85f) * (.25f + frame.tension * 1.5f) + frame.magnet * .5f;
     if (tension > .0001f)
@@ -452,7 +485,7 @@ void FieldDisplay::renderLiquid()
         }
     for (const auto& body : surfaceBodies)
         if (body.radius > .05f)
-            deposit (body.x, body.y, body.radius, juce::jlimit (.84f, 1.19f, body.stretch), juce::jmin (1.f, body.radius / 8.f));
+            deposit (body.x, body.y, body.radius * 1.35f, juce::jlimit (.84f, 1.19f, body.stretch), juce::jmin (1.f, body.radius / 8.f));
     juce::Image::BitmapData pixels (liquidImage, juce::Image::BitmapData::writeOnly);
     for (int y = 0; y < liquidHeight; ++y)
         for (int x = 0; x < liquidWidth; ++x)
@@ -461,7 +494,7 @@ void FieldDisplay::renderLiquid()
             const auto field = liquidField[i];
             if (field < .78f) { pixels.setPixelColour (x, y, juce::Colours::transparentBlack);continue; }
             const auto height2 = blend * std::log (field);
-            const auto gx = liquidHeat[i] / field, gy = liquidGradientY[i] / field;
+            const auto gx = liquidHeat[i] / field, gy = liquidGradientY[i] / field * pixelAspect;
             const auto edge = height2 / (2.f * std::sqrt (gx * gx + gy * gy) + 1.f);
             const auto alpha = juce::jlimit (0.f, 1.f, edge + .5f);
             if (alpha <= 0.f) { pixels.setPixelColour (x, y, juce::Colours::transparentBlack);continue; }
@@ -474,8 +507,10 @@ void FieldDisplay::renderLiquid()
             const auto fill = std::exp (-square ((rx - .72f) / .21f) - square (square ((ry - .08f) / .85f))) * .2f;
             const auto light = juce::jmax (0.f, nx * -.42f + ny * -.52f + nz * .74f);
             const auto rim = 1.f - nz;
-            const auto v = juce::jlimit (0.f, 1.f, (8.f + light * light * light * 15.f + key * 146.f + fill * 100.f + rim * rim * rim * 12.f) / 255.f);
-            pixels.setPixelColour (x, y, juce::Colour::fromFloatRGBA (v * .96f, v, v * .91f, alpha));
+            const auto v = juce::jlimit (0.f, 1.f, .30f + light * .36f + key * .38f + fill * .30f + rim * rim * .22f);
+            const auto film=std::exp(-square((rim-.65f-highDrive*.10f)/.14f));
+            const auto sheen=juce::jlimit(0.f,.38f,film*(.16f+highDrive*.22f+midDrive*.10f));
+            pixels.setPixelColour (x, y, juce::Colour::fromFloatRGBA(v,v,v,alpha).interpolatedWith(accent.withAlpha(alpha),sheen));
         }
 }
 
@@ -512,20 +547,13 @@ void FieldDisplay::mouseDoubleClick (const juce::MouseEvent& event)
 
 void FieldDisplay::paint (juce::Graphics& g)
 {
+    const auto [paper, ink, muted, line, blue, cyan, coral, yellow, mint] = appearance::read (*this);
     const auto area = getLocalBounds().toFloat().reduced (1.0f);
     const auto s = area.getWidth() / 718.0f;
-    g.setGradientFill (juce::ColourGradient (juce::Colour (0xffc6ccb0), area.getX(), area.getY(),
-                                             juce::Colour (0xffe0e1c5), area.getX(), area.getBottom(), false));
-    g.fillRoundedRectangle (area, 20.0f * s);
-    g.setColour (juce::Colours::white.withAlpha (.9f));
-    g.drawRoundedRectangle (area.reduced (2.0f), 18.0f * s, 1.0f);
-    g.setColour (line.withAlpha (.7f));
-    g.setColour (ink);g.drawRoundedRectangle (area.reduced (2.f * s), 15.f * s, 6.f * s);
-    g.setColour (mint);g.drawRoundedRectangle (area.reduced (6.f * s), 11.f * s, 1.8f * s);
     const auto mode = juce::jlimit (0, 10, static_cast<int> (frame.mode));
     const auto title = juce::String (motefield::modeNames[static_cast<std::size_t> (mode)])
                        + " / " + juce::String::charToString (static_cast<juce::juce_wchar> ('A' + frame.variation));
-    text (g, title, { 23.0f * s, 12.0f * s, 150.0f * s, 24.0f * s }, 12.0f * s, ink, true, juce::Justification::centredLeft, .03f);
+
     if (frame.held || frame.bypass)
     {
         const auto badge = juce::Rectangle<float> (146.0f * s, 14.0f * s, 66.0f * s, 21.0f * s);
@@ -533,20 +561,21 @@ void FieldDisplay::paint (juce::Graphics& g)
         g.fillRoundedRectangle (badge, 9.0f * s);
         text (g, frame.bypass ? "BYPASS" : "HELD", badge, 10.0f * s, ink, true, juce::Justification::centred, .08f);
     }
-    const auto view = area.reduced (27.0f * s, 14.0f * s).withTrimmedTop (32.0f * s);
+    const auto view = area.reduced (16.0f * s, 14.0f * s);
     const auto stage = view.withWidth (view.getWidth() * .69f);
     juce::Graphics::ScopedSaveState save (g);
     g.reduceClipRegion (view.toNearestInt());
-    const auto colour = familyColour (mode);
+    const auto colour = juce::Colour(0xffeff1e9);
     g.setImageResamplingQuality (juce::Graphics::highResamplingQuality);
-    g.drawImage (liquidImage, stage);
+    // Inset the entire material, including split satellites, to leave travel room.
+    g.drawImage (liquidImage,stage.reduced(stage.getWidth()*.025f,0));
 
-    const auto contour = view.withTrimmedLeft (view.getWidth() * .75f);
+    const auto contour = view.withTrimmedLeft (view.getWidth() * .75f).withTrimmedBottom(43.f*s);
     g.setColour (line.withAlpha (.7f));
-    g.drawVerticalLine (juce::roundToInt (view.getX() + view.getWidth() * .72f), view.getY(), view.getBottom());
+
     if (frame.mode == motefield::Mode::grid)
     {
-        text (g, "DELAY TAPS", contour.withHeight (12.0f * s), 8.0f * s, muted, true);
+        text (g, "DELAY TAPS", contour.withHeight (12.0f * s), 8.0f * s, juce::Colour (0xffb4bec3), true);
         float longest = .1f;
         for (int i = 0; i < frame.voiceCount; ++i)
             longest = juce::jmax (longest, frame.voices[static_cast<std::size_t> (i)].duration);
@@ -562,7 +591,7 @@ void FieldDisplay::paint (juce::Graphics& g)
     }
     else
     {
-        text (g, "SHAPE / GRAIN ENVELOPE", contour.withHeight (12.0f * s), 8.0f * s, muted, true);
+        text (g, "SHAPE ENVELOPE", contour.withHeight (16.0f * s), 10.0f * s, juce::Colour (0xffeeeeea), false);
         const auto plot = contour.withTrimmedTop (19.0f * s).withTrimmedBottom (3.0f * s);
         const auto envelopePoint = [&] (float phase, float power)
         {
@@ -576,7 +605,7 @@ void FieldDisplay::paint (juce::Graphics& g)
         g.setColour (colour.withAlpha (.7f));
         g.strokePath (envelope, juce::PathStrokeType (1.5f * s));
         envelope.closeSubPath();
-        g.setColour (colour.withAlpha (.10f));
+        g.setColour (colour.withAlpha (.0f));
         g.fillPath (envelope);
         if (! reducedMotion)
             for (int i = 0; i < frame.voiceCount; ++i)
@@ -591,29 +620,29 @@ void FieldDisplay::paint (juce::Graphics& g)
     }
 }
 
-void LooperTape::paint (juce::Graphics& g)
+void LooperTape::paint(juce::Graphics& g)
 {
-    const auto& frame = field.currentFrame();
-    const auto area = getLocalBounds().toFloat().reduced (2.0f, 5.0f);
-    const auto mid = area.getCentreY();
-    g.setColour (line.withAlpha (.65f));
-    g.fillRoundedRectangle (area.withHeight (4.0f).withCentre (area.getCentre()), 2.0f);
-    if (frame.loopState == motefield::LooperState::empty) return;
-    for (std::size_t bin = 0; bin < frame.loopWaveform.size(); ++bin)
-    {
-        const auto x = area.getX() + static_cast<float> (bin) / 127.0f * area.getWidth();
-        const auto amplitude = juce::jmin (1.0f, std::sqrt (frame.loopWaveform[bin])) * area.getHeight() * .47f;
-        g.setColour (ink.withAlpha (.43f));
-        g.drawLine (x, mid - amplitude, x, mid + amplitude, 1.4f);
-    }
-    const auto playX = area.getX() + frame.loopProgress * area.getWidth();
-    const auto colour = frame.loopState == motefield::LooperState::recording || frame.loopState == motefield::LooperState::overdubbing ? coral : yellow;
-    g.setColour (colour.withAlpha (.45f));
-    g.fillRoundedRectangle ({ area.getX(), mid - 2.0f, juce::jmax (1.0f, playX - area.getX()), 4.0f }, 2.0f);
-    g.setColour (colour);
-    g.fillEllipse (playX - 5.0f, mid - 5.0f, 10.0f, 10.0f);
-    g.setColour (juce::Colours::white.withAlpha (.8f));
-    g.drawEllipse (playX - 5.0f, mid - 5.0f, 10.0f, 10.0f, 1.0f);
+    const auto& frame=field.currentFrame();const auto p=appearance::read(*this);
+    const auto s=getWidth()/1210.f;auto area=getLocalBounds().toFloat().reduced(2,5*s);
+    const auto plot=area.withTrimmedTop(27*s).withTrimmedBottom(5*s);
+    const auto seconds=frame.loopSeconds>0?frame.loopSeconds:60.f;
+    for(int tick=0;tick<=4;++tick)
+    {const auto x=plot.getX()+plot.getWidth()*tick/4.f;
+     text(g,juce::String(seconds*tick/4.f,1)+" s",{x-(tick==4?66*s:0),area.getY(),66*s,22*s},14*s,juce::Colour(0xffeeeeea));
+     g.setColour(juce::Colours::white.withAlpha(.18f));g.drawLine(x,plot.getY(),x,plot.getBottom(),.7f);}
+    g.setColour(juce::Colours::white.withAlpha(.2f));g.drawHorizontalLine(juce::roundToInt(plot.getCentreY()),plot.getX(),plot.getRight());
+    if(frame.loopState==motefield::LooperState::empty)return;
+    juce::Path wave;
+    const auto point=[&](int bin,bool upper){const auto amp=juce::jmin(1.f,std::pow(frame.loopWaveform[bin],.40f))*plot.getHeight()*.48f;
+        return juce::Point<float>(plot.getX()+static_cast<float>(bin)/(frame.loopWaveform.size()-1)*plot.getWidth(),plot.getCentreY()+(upper?-amp:amp));};
+    wave.startNewSubPath(point(0,true));for(int i=1;i<static_cast<int>(frame.loopWaveform.size());++i)wave.lineTo(point(i,true));for(int i=static_cast<int>(frame.loopWaveform.size())-1;i>=0;--i)wave.lineTo(point(i,false));wave.closeSubPath();
+    g.setColour(juce::Colour(0xfff0f1e9));g.fillPath(wave);
+    const auto playX=plot.getX()+frame.loopProgress*plot.getWidth();
+    for(int glow=7;glow>0;--glow){g.setColour(p.cyan.withAlpha(.025f));g.drawLine(playX,plot.getY()-7*s,playX,plot.getBottom(),glow*2*s);}
+    g.setColour(p.cyan);g.drawLine(playX,plot.getY()-7*s,playX,plot.getBottom(),2*s);
+    auto badge=juce::Rectangle<float>(64*s,24*s).withCentre({juce::jlimit(area.getX()+32*s,area.getRight()-32*s,playX),area.getY()+11*s});
+    g.setColour(juce::Colour(0xff101510));g.fillRoundedRectangle(badge,5*s);g.setColour(p.cyan);g.drawRoundedRectangle(badge,5*s,1);
+    text(g,juce::String(frame.loopProgress*seconds,1)+" s",badge,14*s,p.cyan,false,juce::Justification::centred);
 }
 
 MoteFieldAudioProcessorEditor::MoteFieldAudioProcessorEditor (MoteFieldAudioProcessor& owner)
@@ -624,7 +653,7 @@ MoteFieldAudioProcessorEditor::MoteFieldAudioProcessorEditor (MoteFieldAudioProc
     setOpaque (true);
     rangoLogo = juce::ImageCache::getFromMemory (BinaryData::RangoLogo_png, BinaryData::RangoLogo_pngSize);
     modeSelector.setSliderStyle (juce::Slider::RotaryVerticalDrag);
-    modeSelector.setRotaryParameters (pi * 7.f / 6.f, pi * 17.f / 6.f, true);
+    modeSelector.setRotaryParameters (pi * 4.f / 3.f, pi * 3.f, true);
     modeSelector.setTextBoxStyle (juce::Slider::NoTextBox, false, 0, 0);
     modeSelector.setPopupDisplayEnabled (false, false, nullptr);
     modeSelector.setComponentID ("mode-selector");
@@ -636,6 +665,7 @@ MoteFieldAudioProcessorEditor::MoteFieldAudioProcessorEditor (MoteFieldAudioProc
     addAndMakeVisible (fieldDisplay);
     fieldDisplay.gesture = [this] (const char* id, float v, int stage)
     { if (auto* p = processor.parameters.getParameter (id)) { if (stage == 0) p->beginChangeGesture(); else if (stage == 2) p->endChangeGesture(); else p->setValueNotifyingHost (p->convertTo0to1 (v)); } };
+    looperTape.setComponentID ("loop-waveform");
     addAndMakeVisible (looperTape);
     addKnob ("ACTIVITY", density, "Activity: changes how often fragments appear and overlap.");
     addKnob ("SHAPE", shape, "Shape: changes the volume contour of each fragment.");
@@ -703,6 +733,7 @@ MoteFieldAudioProcessorEditor::MoteFieldAudioProcessorEditor (MoteFieldAudioProc
     const auto command = [this] (juce::TextButton& button, motefield::LooperCommand action, const char* id)
     {
         button.getProperties().set ("style", 6);
+        button.getProperties().set ("darkControl",true);
         button.setComponentID (id);
         button.onClick = [this, action] { processor.requestLooperCommand (action); };
     };
@@ -723,7 +754,7 @@ MoteFieldAudioProcessorEditor::MoteFieldAudioProcessorEditor (MoteFieldAudioProc
     detailsButton.onClick = [this] { setDetailsOpen (detailsButton.getToggleState()); };
     setupButton (performanceButton, "PERFORM", "Loop, material, sidechain, pattern and MIDI controls.");
     performanceButton.setComponentID ("perform");
-    performanceButton.onClick = [this] { if (! performancePanel) { performancePanel = std::make_unique<PerformancePanel> (processor); addAndMakeVisible (*performancePanel); } performancePanel->setBounds (getLocalBounds().reduced (14)); performancePanel->setVisible (true); performancePanel->toFront (true); };
+    performanceButton.onClick = [this] { if (! performancePanel) { performancePanel = std::make_unique<PerformancePanel> (processor); addAndMakeVisible (*performancePanel); } performancePanel->setBounds (getLocalBounds().reduced (14)); performancePanel->sendLookAndFeelChange(); performancePanel->setVisible (true); performancePanel->toFront (true); };
     setupButton (motionButton, "LESS MOTION", "Keep the liquid voices in fixed positions while their size follows the sound.", true);
     motionButton.onClick = [this] { fieldDisplay.setReducedMotion (motionButton.getToggleState()); };
     setupCombo (presetBox, {}, "Factory and User presets. Loop audio, Hold and Bypass are retained.");
@@ -740,6 +771,9 @@ MoteFieldAudioProcessorEditor::MoteFieldAudioProcessorEditor (MoteFieldAudioProc
     savePresetButton.setComponentID ("save-preset");
     savePresetButton.getProperties().set ("style", 0);
     savePresetButton.onClick = [this] { showSavePresetDialog(); };
+    setupButton(randomPresetButton,"RANDOM","Create a new sound. Keeps your loop, transport, tempo and output level. Use SAVE to keep it.",false,0);
+    randomPresetButton.setComponentID("random-preset");
+    randomPresetButton.onClick=[this]{processor.randomizeSound(juce::Random::getSystemRandom().nextInt64());refreshDisplay();};
     setupCombo (roomBox, { "Bright", "Dark", "Hall", "Infinite" }, "Reverb character.");
     setupCombo (speedBox, { "1/2x", "1x", "2x" }, "Phrase playback speed.");
     setupCombo (divisionBox, { "1/32", "1/16T", "1/16", "1/8T", "1/8", "1/4T", "1/4", "1/2", "1 bar" }, "Rhythmic subdivision. Also applies to the manual tempo.");
@@ -751,17 +785,24 @@ MoteFieldAudioProcessorEditor::MoteFieldAudioProcessorEditor (MoteFieldAudioProc
     addAndMakeVisible (tempoLabel);
     timeValueLabel.setJustificationType (juce::Justification::centred);
     addAndMakeVisible (timeValueLabel);
+    setupButton (settingsButton, "SETTINGS", "Accent color and dark mode.");
+    settingsButton.setComponentID ("settings");
+    settingsButton.onClick = [this] {
+        settingsPanel = std::make_unique<appearance::SettingsPanel> (*appearancePreferences, [this] { applyAppearance(); });
+        addAndMakeVisible (*settingsPanel); settingsPanel->setBounds (getLocalBounds()); settingsPanel->sendLookAndFeelChange(); settingsPanel->toFront (true); settingsPanel->grabKeyboardFocus();
+    };
+    applyAppearance();
     updateTimeAttachment();
     setResizable (true, true);
     int initialWidth = 1000;
     if (const auto* screen = juce::Desktop::getInstance().getDisplays().getPrimaryDisplay())
         initialWidth = juce::jmin (initialWidth, juce::roundToInt (screen->userBounds.getWidth() * .80f),
-                                 juce::roundToInt (screen->userBounds.getHeight() * .80f * 1240.f / 800.f));
+                                 juce::roundToInt (screen->userBounds.getHeight() * .80f * 1620.f / 972.f));
     initialWidth = juce::jmax (640, initialWidth);
     const auto minimumWidth = juce::jmin (900, initialWidth);
-    setResizeLimits (minimumWidth, juce::roundToInt (minimumWidth * 800.0 / 1240.0), 1860, 1200);
-    getConstrainer()->setFixedAspectRatio (1240.0 / 800.0);
-    setSize (initialWidth, juce::roundToInt (initialWidth * 800.0 / 1240.0));
+    setResizeLimits (minimumWidth, juce::roundToInt (minimumWidth * 972.0 / 1620.0), 1860, 1200);
+    getConstrainer()->setFixedAspectRatio (1620.0 / 972.0);
+    setSize (initialWidth, juce::roundToInt (initialWidth * 972.0 / 1620.0));
     refreshDisplay();
     startTimerHz (60);
 }
@@ -886,7 +927,8 @@ void MoteFieldAudioProcessorEditor::stepPreset (int direction)
 void MoteFieldAudioProcessorEditor::showSavePresetDialog()
 {
     if (presetNameDialog != nullptr) return;
-    presetNameDialog = std::make_unique<juce::AlertWindow> ("Save user preset", "Name this sound. Loop audio, Hold and Bypass are not stored in sound presets.", juce::MessageBoxIconType::NoIcon);
+    presetNameDialog = std::make_unique<juce::AlertWindow> ("Save user preset", "Name this sound. Your recorded phrase is saved too. Hold and Bypass are not stored.", juce::MessageBoxIconType::NoIcon);
+    presetNameDialog->setLookAndFeel (&lookAndFeel);
     presetNameDialog->addTextEditor ("name", processor.currentPresetSource().isEmpty() ? "My preset" : processor.currentPresetName(), "Preset name");
     presetNameDialog->addButton ("Save", 1, juce::KeyPress (juce::KeyPress::returnKey));
     presetNameDialog->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
@@ -919,10 +961,10 @@ void MoteFieldAudioProcessorEditor::setDetailsOpen (bool open)
     if (open) collapsedWidth = getWidth();
     const auto previousHeight = getHeight();
     detailsOpen = open;
-    const auto height = detailsOpen ? 990.0 : 800.0;
+    const auto height = detailsOpen ? 1220.0 : 972.0;
     // Opening the drawer must not grow beyond the window's existing height.
     // Also allow smaller sizes when the host window sits near a screen edge.
-    auto width = open ? juce::jmin (getWidth(), static_cast<int> (previousHeight * 1240.0 / height)) : collapsedWidth;
+    auto width = open ? juce::jmin (getWidth(), static_cast<int> (previousHeight * 1620.0 / height)) : collapsedWidth;
     auto maximumWidth = 1860;
     const auto screen = getScreenBounds();
     if (const auto* display = juce::Desktop::getInstance().getDisplays().getDisplayForRect (screen))
@@ -932,13 +974,13 @@ void MoteFieldAudioProcessorEditor::setDetailsOpen (bool open)
         const auto scaleY = static_cast<float> (screen.getHeight()) / static_cast<float> (juce::jmax (1, getHeight()));
         const auto roomWidth = (available.getRight() - juce::jmax (available.getX(), static_cast<float> (screen.getX()))) / juce::jmax (.1f, scaleX);
         const auto roomHeight = (available.getBottom() - juce::jmax (available.getY(), static_cast<float> (screen.getY()))) / juce::jmax (.1f, scaleY);
-        maximumWidth = juce::jmax (1, juce::jmin (maximumWidth, static_cast<int> (roomWidth), static_cast<int> (roomHeight * 1240.0 / height)));
+        maximumWidth = juce::jmax (1, juce::jmin (maximumWidth, static_cast<int> (roomWidth), static_cast<int> (roomHeight * 1620.0 / height)));
     }
     width = juce::jlimit (1, maximumWidth, width);
     const auto minimumWidth = juce::jmin (1000, width);
-    getConstrainer()->setFixedAspectRatio (1240.0 / height);
-    setResizeLimits (minimumWidth, juce::roundToInt (minimumWidth * height / 1240.0), maximumWidth, juce::roundToInt (maximumWidth * height / 1240.0));
-    setSize (width, juce::roundToInt (width * height / 1240.0));
+    getConstrainer()->setFixedAspectRatio (1620.0 / height);
+    setResizeLimits (minimumWidth, juce::roundToInt (minimumWidth * height / 1620.0), maximumWidth, juce::roundToInt (maximumWidth * height / 1620.0));
+    setSize (width, juce::roundToInt (width * height / 1620.0));
     detailsButton.setButtonText (detailsOpen ? "DETAILS -" : "DETAILS +");
     resized();
 }
@@ -954,6 +996,7 @@ juce::String MoteFieldAudioProcessorEditor::currentHelp() const
 void MoteFieldAudioProcessorEditor::refreshDisplay()
 {
     using namespace motefield::parameter;
+    if (appearanceRevision != appearancePreferences->revision) applyAppearance();
     if (lastSync != (value (motefield::parameter::sync) > .5f) && ! knobs[4]->slider.isMouseButtonDown()) updateTimeAttachment();
     motefield::VisualFrame frame = fieldDisplay.currentFrame();
     const auto previousAudioTime = frame.sampleTime;
@@ -1001,107 +1044,67 @@ void MoteFieldAudioProcessorEditor::refreshDisplay()
     repaint();
 }
 
-void MoteFieldAudioProcessorEditor::resized()
+void MoteFieldAudioProcessorEditor::applyAppearance()
 {
-    const auto s = static_cast<float> (getWidth()) / 1240.0f;
-    const auto place = [s] (juce::Component& component, int x, int y, int width, int height)
-    {
-        component.setBounds ((juce::Rectangle<float> (static_cast<float> (x), static_cast<float> (y), static_cast<float> (width), static_cast<float> (height)) * s).toNearestInt());
-    };
-    if (! hardwarePanel.isValid() || hardwarePanel.getHeight() != (detailsOpen ? 990 : 800)) hardwarePanel = makeHardwarePanel (detailsOpen ? 990 : 800);
-    for (int i = 0; i < 8; ++i) place (*knobs[static_cast<std::size_t> (i)], 50 + (i % 4) * 183, i < 4 ? 106 : 265, 153, 143);
-    if (performancePanel) performancePanel->setBounds (getLocalBounds().reduced (14));
-    place (performanceButton, 628, 420, 110, 30);
-    place (syncButton, 62, 420, 94, 30);
-    place (timeValueLabel, 157, 420, 62, 30);
-    timeValueLabel.setFont (font (13.0f * s, true));
-    place (tempoLabel, 230, 425, 180, 18);
-    tempoLabel.setFont (font (9.5f * s, false, .065f));
-    place (modeSelector, 941, 226, 116, 116);
-    for (int i = 0; i < 11; ++i)
-    {
-        const auto a = (-150.f + i * 30.f) * pi / 180.f;
-        const auto cx = 999.f + std::sin (a) * 118.f, cy = 284.f - std::cos (a) * 118.f;
-        place (modeButtons[static_cast<std::size_t> (i)], juce::roundToInt (cx - 29), juce::roundToInt (cy - 15), 58, 30);
-    }
-    place (reverseButton, 634, 486, 112, 30);
-    for (int i = 0; i < 4; ++i) place (variationButtons[static_cast<std::size_t> (i)], 903 + i * 75, 438, 65, 35);
-    place (fieldDisplay, 44, 480, 718, 198);
-    place (tapButton, 804, 488, 114, 181);
-    place (holdButton, 942, 488, 114, 181);
-    place (bypassButton, 1080, 488, 114, 181);
-    place (looperTape, 218, 691, 404, 30);
-    place (recordButton, 44, 729, 79, 34);
-    place (playButton, 136, 729, 79, 34);
-    place (dubButton, 228, 729, 79, 34);
-    place (stopButton, 340, 729, 79, 34);
-    place (undoButton, 432, 729, 79, 34);
-    place (eraseButton, 524, 729, 79, 34);
-    place (preButton, 803, 729, 55, 34);
-    place (postButton, 862, 729, 55, 34);
-    place (loopReverseButton, 944, 729, 95, 34);
-    place (detailsButton, 1080, 729, 114, 34);
-    place (presetBox, 798, 51, 180, 36);
-    place (savePresetButton, 979, 51, 48, 36);
-    place (previousPreset, 764, 52, 30, 34);
-    place (nextPreset, 1030, 52, 30, 34);
-    for (int i = 8; i < 12; ++i)
-    {
-        knobs[static_cast<std::size_t> (i)]->setVisible (detailsOpen);
-        place (*knobs[static_cast<std::size_t> (i)], 48 + (i - 8) * 175, 812, 145, 140);
-    }
-    for (auto* component : std::array<juce::Component*, 4> { &roomBox, &speedBox, &divisionBox, &motionButton }) component->setVisible (detailsOpen);
-    place (roomBox, 804, 830, 157, 34);
-    place (speedBox, 990, 830, 204, 34);
-    place (divisionBox, 804, 902, 157, 34);
-    place (motionButton, 990, 902, 204, 34);
+    appearanceRevision = appearancePreferences->revision;
+    lookAndFeel.setAppearance (appearancePreferences->dark, appearancePreferences->accent);
+    sendLookAndFeelChange();
+    hardwarePanel = {};
+    tempoLabel.setColour (juce::Label::textColourId, juce::Colour(0xffd5d8d4));
+    timeValueLabel.setColour (juce::Label::textColourId, juce::Colour(0xffeff1ed));
+    fieldDisplay.invalidateMaterial();
+    resized(); repaint();
 }
 
-void MoteFieldAudioProcessorEditor::paint (juce::Graphics& g)
+void MoteFieldAudioProcessorEditor::resized()
 {
-    const auto scale = static_cast<float> (getWidth()) / 1240.f;
-    g.addTransform (juce::AffineTransform::scale (scale));
-    g.drawImageAt (hardwarePanel, 0, 0);
-    const auto& frame = fieldDisplay.currentFrame();
-    if (rangoLogo.isValid())
-    {
-        juce::Graphics::ScopedSaveState save (g);
-        const auto drive = motionButton.getToggleState() ? 0.f : logoDrive;
-        const auto transform = juce::AffineTransform::scale (1.f + drive * .045f, 1.f - drive * .025f, 93.f, 64.f)
-                                  .rotated (drive * .025f, 93.f, 64.f);
-        g.addTransform (transform);g.setColour (ink);
-        g.drawImage (rangoLogo, { 32, 7, 122, 122 }, juce::RectanglePlacement::centred, true);
-    }
-    text (g, "MoteField", { 151, 27, 470, 51 }, 42, ink, true);
-    text (g, "by Rango Labs", { 154, 81, 300, 24 }, 15, muted);
-    text (g, "Out", { 1072, 51, 38, 36 }, 11, muted);
-    const auto meter = juce::jlimit (0.f, 1.f, (juce::Decibels::gainToDecibels (frame.outputLevel, -60.f) + 48.f) / 48.f);
-    for (int i = 0; i < 14; ++i)
-    {
-        g.setColour (meter > static_cast<float> (i) / 14.f ? ink : line.withAlpha (.6f));
-        const float h = 9.f + i * 1.15f;
-        g.fillRect (1117.f + i * 5.5f, 84.f-h, 3.f, h);
-    }
-    text (g, "EFFECT MODE", { 810, 123, 375, 25 }, 11, muted, true, juce::Justification::centred, .07f);
-    const auto mode = juce::jlimit (0, 10, static_cast<int> (frame.mode));
-    const auto family = mode < 3 ? "Micro loops" : mode < 6 ? "Granules" : mode < 9 ? "Glitch" : "Multi delay";
-    text (g, family, { 810, 405, 375, 22 }, 11, muted, false, juce::Justification::centred);
-    text (g, "VARIATION", { 811, 439, 85, 32 }, 9, muted);
-    g.setColour (line.withAlpha (.7f));g.drawLine (50, 462, 760, 462, .8f);
-    text (g, "PHRASE LOOPER", { 49, 694, 160, 23 }, 10, ink, true);
-    const auto recording = frame.loopState == motefield::LooperState::recording;
-    const auto time = frame.loopState == motefield::LooperState::empty ? "READY / 60 SEC"
-        : secondsText (recording ? frame.loopSeconds : frame.loopSeconds * frame.loopProgress) + " / " + (recording ? "01:00" : secondsText (frame.loopSeconds));
-    text (g, time, { 632, 694, 135, 23 }, 10, muted, false, juce::Justification::centredRight);
-    text (g, "LOOPER POSITION", { 809, 696, 144, 19 }, 8, muted);
-    text (g, helpText, { 49, 773, 965, 17 }, 9.5f, muted);
-    text (g, "RANGO LABS / " + juce::String (JucePlugin_VersionString), { 1060, 773, 132, 17 }, 8, muted, false, juce::Justification::centredRight);
-    if (detailsOpen)
-    {
-        text (g, "REVERB CHARACTER", { 805, 810, 160, 18 }, 8, muted, true);
-        text (g, "LOOP SPEED", { 992, 810, 160, 18 }, 8, muted, true);
-        text (g, "SUBDIVISION", { 805, 881, 160, 18 }, 8, muted, true);
-        text (g, "DISPLAY", { 992, 881, 160, 18 }, 8, muted, true);
-        text (g, "Loops save with your project. Open Perform for capture, export, material and MIDI controls.", { 50, 961, 1140, 18 }, 10, muted);
-    }
+    const auto s=static_cast<float>(getWidth())/1620.f;
+    const auto place=[s](juce::Component& c,float x,float y,float w,float h){c.setBounds(juce::Rectangle<float>(x*s,y*s,w*s,h*s).toNearestInt());};
+    const auto height=detailsOpen?1220:972;
+    if(!hardwarePanel.isValid()||hardwarePanel.getHeight()!=height)hardwarePanel=makeHardwarePanel(height,lookAndFeel.colours);
+    for(auto& b:modeButtons)b.getProperties().set("glassDark",true);
+    for(int i=0;i<4;++i)place(*knobs[i],443+i*201,79,116,133);
+    for(int i=4;i<8;++i)place(*knobs[i],310+(i-4)*199,574,116,127);
+    if(performancePanel)performancePanel->setBounds(getLocalBounds().reduced(14));
+    if(settingsPanel)settingsPanel->setBounds(getLocalBounds());
+    place(modeSelector,159,276,186,186);
+    for(int i=0;i<11;++i)
+    {const auto angle=(-120.f+i*30.f)*pi/180.f;place(modeButtons[i],252+std::sin(angle)*116-27,369-std::cos(angle)*116-13,54,26);}
+    for(int i=0;i<4;++i)place(variationButtons[i],126+i*65,502,60,44);
+    place(fieldDisplay,431,221,1090,321);
+    place(reverseButton,1275,496,168,45);reverseButton.getProperties().set("darkControl",true);
+    place(tapButton,1084,588,134,100);place(holdButton,1226,588,134,100);place(bypassButton,1366,588,134,100);
+    place(looperTape,271,728,1210,121);
+    place(recordButton,484,871,88,60);place(playButton,578,871,88,60);place(dubButton,674,871,88,60);
+    place(stopButton,770,871,88,60);place(undoButton,866,871,88,60);place(eraseButton,962,871,88,60);
+    place(preButton,1071,871,87,60);place(postButton,1167,871,87,60);place(loopReverseButton,1264,871,87,60);place(detailsButton,1455,871,90,60);
+    for(auto* b:{&preButton,&postButton,&loopReverseButton,&detailsButton}){b->getProperties().set("style",0);b->getProperties().set("darkControl",true);b->getProperties().set("utility",true);}
+    loopReverseButton.setButtonText("REVERSE");
+    detailsButton.setButtonText(detailsOpen?"LESS":"DETAILS");
+    place(settingsButton,1360,871,87,60);settingsButton.getProperties().set("darkControl",true);settingsButton.getProperties().set("utility",true);
+    place(syncButton,78,878,92,45);place(timeValueLabel,175,878,65,45);timeValueLabel.setFont(font(15*s,true));
+    place(tempoLabel,245,878,119,45);tempoLabel.setFont(font(13*s));place(performanceButton,363,878,89,45);
+    place(randomPresetButton,806,34,100,48);
+    place(presetBox,978,34,288,48);place(previousPreset,918,34,52,48);place(savePresetButton,1277,34,74,48);place(nextPreset,1361,34,46,48);
+    for(int i=8;i<12;++i){knobs[i]->setVisible(detailsOpen);place(*knobs[i],60+(i-8)*210,1000,164,178);}
+    for(auto* c:std::array<juce::Component*,4>{&roomBox,&speedBox,&divisionBox,&motionButton})c->setVisible(detailsOpen);
+    place(roomBox,962,1020,234,42);place(speedBox,1240,1020,290,42);place(divisionBox,962,1112,234,42);place(motionButton,1240,1112,290,42);
+}
+
+void MoteFieldAudioProcessorEditor::paint(juce::Graphics& g)
+{
+    const auto p=appearance::read(*this);const auto s=static_cast<float>(getWidth())/1620.f;g.addTransform(juce::AffineTransform::scale(s));g.drawImageAt(hardwarePanel,0,0);
+    {juce::Graphics::ScopedSaveState saved(g);const auto drive=motionButton.getToggleState()?0.f:logoDrive;
+     g.addTransform(juce::AffineTransform::scale(1.f+drive*.045f,1.f-drive*.025f,132.f,56.f));g.setColour(p.ink);g.drawImage(rangoLogo,juce::Rectangle<float>(80,7,113,99),juce::RectanglePlacement::centred,true);}
+    text(g,"MoteField",{192,27,350,40},33,p.ink,false);text(g,"by Rango Labs",{192,66,280,23},17,p.muted);
+    text(g,"Out",{1411,43,44,30},13,p.ink);
+    const auto& f=fieldDisplay.currentFrame();const auto level=juce::jlimit(0.f,1.f,(juce::Decibels::gainToDecibels(f.outputLevel,-60.f)+48.f)/48.f);
+    for(int i=0;i<18;++i){g.setColour(i<level*18?p.ink:p.line.withAlpha(.4f));g.fillRect(1455.f+i*5.2f,73.f-(i+5)*1.2f,3.6f,(i+5)*1.2f);}
+    text(g,"EFFECT MODE",{133,219,239,27},15,juce::Colours::white,false,juce::Justification::centred);
+    text(g,"RECORDED LOOP",{86,729,177,27},16,juce::Colours::white);
+    text(g,"Loop 01",{94,762,160,26},19,juce::Colours::white);
+    text(g,secondsText(f.loopSeconds),{94,792,165,24},15,juce::Colours::white);
+    const auto state=processor.getLooperState();const auto status=state==motefield::LooperState::empty?"READY":state==motefield::LooperState::recording?"RECORDING":state==motefield::LooperState::overdubbing?"OVERDUB":state==motefield::LooperState::stopped?"STOPPED":"PLAYING";
+    text(g,status,{95,825,164,24},15,p.cyan);
+    if(detailsOpen){text(g,"REVERB CHARACTER",{962,992,234,24},13,p.muted);text(g,"LOOP SPEED",{1240,992,260,24},13,p.muted);text(g,"SUBDIVISION",{962,1084,234,24},13,p.muted);text(g,"DISPLAY",{1240,1084,234,24},13,p.muted);}
 }

@@ -2,11 +2,14 @@
 #include <JuceHeader.h>
 #include "PluginProcessor.h"
 #include "PerformancePanel.h"
+#include "Appearance.h"
 
 class MoteFieldLookAndFeel final : public juce::LookAndFeel_V4
 {
 public:
     MoteFieldLookAndFeel();
+    void setAppearance (bool dark, juce::Colour accent);
+    appearance::Palette colours = appearance::palette (false, juce::Colour (appearance::acid));
     void drawRotarySlider (juce::Graphics&, int, int, int, int, float, float, float, juce::Slider&) override;
     void drawButtonBackground (juce::Graphics&, juce::Button&, const juce::Colour&, bool, bool) override;
     void drawButtonText (juce::Graphics&, juce::TextButton&, bool, bool) override;
@@ -46,6 +49,7 @@ public:
     void mouseUp (const juce::MouseEvent&) override;
     void mouseDoubleClick (const juce::MouseEvent&) override;
     juce::String getTooltip() override { return "Drag liquid to scan / transpose. Shift-drag stretches. Alt-drag splits voices. Double-click resets."; }
+    void invalidateMaterial() { materialRendered = false; }
     void setShape (float value) { shape = value; }
     void setSampleRate (double value) { sampleRate = value > 0.0 ? value : 48000.0; }
     void setReducedMotion (bool enabled) { reducedMotion = enabled; repaint(); }
@@ -69,7 +73,7 @@ private:
     float staleSeconds = 0.f, lowDrive = 0.f, midDrive = 0.f, highDrive = 0.f;
     float centreX = 240.f, centreY = 72.f;
     void renderLiquid();
-    static constexpr int liquidWidth = 480, liquidHeight = 144;
+    static constexpr int liquidWidth = 480, liquidHeight = 240;
     std::array<LiquidVoice, 64> liquidVoices {};
     std::array<float, liquidWidth * liquidHeight> liquidField {}, liquidHeat {}, liquidGradientY {};
     juce::Image liquidImage { juce::Image::ARGB, liquidWidth, liquidHeight, true };
@@ -96,6 +100,7 @@ public:
     void paint (juce::Graphics&) override;
     void resized() override;
     void refreshDisplay();
+    void applyAppearance();
 private:
     using SliderAttachment = juce::AudioProcessorValueTreeState::SliderAttachment;
     using ButtonAttachment = juce::AudioProcessorValueTreeState::ButtonAttachment;
@@ -117,8 +122,14 @@ private:
     juce::String currentHelp() const;
 
     MoteFieldAudioProcessor& processor;
+    juce::SharedResourcePointer<appearance::Preferences> appearancePreferences;
+    int appearanceRevision = -1;
     MoteFieldLookAndFeel lookAndFeel;
+    juce::TextButton settingsButton;
+    std::unique_ptr<appearance::SettingsPanel> settingsPanel;
     juce::Image hardwarePanel, rangoLogo;
+    int cachedGlassFinish = -1;
+    juce::String cachedPrintPreview;
     float logoDrive = 0.0f;
     PerformanceSlider modeSelector;
     std::unique_ptr<SliderAttachment> modeAttachment;
@@ -133,7 +144,7 @@ private:
     juce::TextButton reverseButton, syncButton, tapButton, holdButton, bypassButton;
     juce::TextButton recordButton, playButton, dubButton, stopButton, undoButton, eraseButton;
     juce::TextButton preButton, postButton, loopReverseButton, detailsButton, motionButton;
-    juce::TextButton previousPreset, nextPreset, savePresetButton, performanceButton;
+    juce::TextButton previousPreset, nextPreset, savePresetButton, randomPresetButton, performanceButton;
     std::unique_ptr<PerformancePanel> performancePanel;
     bool momentaryHoldDown = false;
     juce::ComboBox presetBox, roomBox, speedBox, divisionBox;

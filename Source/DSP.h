@@ -126,7 +126,7 @@ struct VisualFrame
     LooperState loopState = LooperState::empty;
     bool held = false, reverse = false, bypass = false, canUndo = false;
     std::array<VisualVoice, 54> voices {};
-    std::array<float, 128> loopWaveform {};
+    std::array<float, 512> loopWaveform {};
     // Chronological min/max bins of the final stereo output (~320 ms).
     std::array<std::array<float, outputPoints>, 2> outputLow {}, outputHigh {};
 };

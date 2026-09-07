@@ -1,5 +1,28 @@
 # Verification
 
+## Version 0.3.3
+
+Restores the voice-driven implicit fluid surface in place of the incorrectly retained logo silhouette, preserving the approved enclosure and pearl material. Adds RANDOM beside the preset picker to generate sound settings while retaining recorded audio, transport, timing/sync and output gain. Universal VST3 and AU are installed and match the staged 0.3.3 binaries.
+
+- DSP and click suites passed in 50.52 and 7.84 seconds.
+- Native checks include a round resting fluid volume, changed geometry when voice positions move with unchanged meters, independent audio-band response, snapshot stability and silence settling.
+- RANDOM checks passed for host gestures, preservation of non-randomized parameters and loop audio, repeatable seeds, different generated sounds, and user preset save/recall. Existing full UI/integration tests passed.
+- AU validation passed with the existing MIDI-on-aufx warning.
+- Extracted friend kit passed simulated quarantine installation, reinstall backup, universal signatures and versions, and rejection of a corrupted payload. Clean-machine and Intel DAW execution are still pending.
+- ZIP SHA-256: `d1823b8b8a9205f38dfedf9452ce44b7de588bc2587d825befbd83a2e5553692`.
+
+
+## Version 0.3.2
+
+The approved clear Acid interface was built as universal macOS VST3, AU, standalone, and native preview binaries. VST3 and AU are installed locally, report 0.3.2, and match the staged release executables byte-for-byte. Previous bundles were backed up before replacement.
+
+- DSP tests passed in 51.30 seconds; click-regression tests passed in 8.60 seconds.
+- Native integration/UI checks passed for modes, selector alignment, variations, presets, automation attachments, looper audio recall/export, MIDI learn, sidechain routing, appearance persistence, resizing, and material response/settling.
+- Apple AU validation passed. The existing MIDI-on-aufx warning remains as described below.
+- The 33,523,213-byte private Mac ZIP was extracted and tested with simulated download quarantine. Fresh installation, reinstallation backup, signature/architecture/version checks, staged-binary equality, and rejection of a modified payload all passed in an isolated installation root. This is not a clean-machine or Intel DAW execution test.
+- ZIP SHA-256: `31b0139e6e61834fc901478d96588c538f0121167ec7a1fd3be5bd66b7835812`. This kit is locally signed for private testing and is not notarized.
+
+
 ## Version 0.3.0
 
 Universal macOS VST3, AU, standalone, and native editor harness builds completed. VST3 and AU are installed locally and report 0.3.0. The installed VST3 executable matches the staged binary by SHA-256. Previous installed copies were backed up before replacement.

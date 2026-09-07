@@ -2,6 +2,12 @@ name: Build plug-ins
 
 on:
   workflow_dispatch:
+    inputs:
+      platform:
+        description: Platform to build
+        type: choice
+        options: [all, windows, macos]
+        default: all
   push:
     branches: [main]
 
@@ -10,6 +16,7 @@ permissions:
 
 jobs:
   macos:
+    if: github.event_name != 'workflow_dispatch' || inputs.platform != 'windows'
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
@@ -28,12 +35,21 @@ jobs:
           if-no-files-found: error
 
   windows:
+    if: github.event_name != 'workflow_dispatch' || inputs.platform != 'macos'
     runs-on: windows-2025
     steps:
       - uses: actions/checkout@v4
       - name: Build x64 plugin and test DSP
         shell: pwsh
         run: ./scripts/build-windows.ps1
+      - name: Package and verify direct-install Windows ZIP
+        shell: pwsh
+        run: ./scripts/package-friend-windows.ps1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MoteField-Windows-direct-install-ZIP
+          path: dist/friend-test/MoteField-*-Windows-Test.zip*
+          if-no-files-found: error
       - name: Install Inno Setup
         shell: pwsh
         run: |
@@ -44,6 +60,12 @@ jobs:
       - name: Package development installer
         shell: pwsh
         run: ./scripts/package-windows.ps1 -Unsigned
+      - name: Verify installer and uninstaller
+        shell: pwsh
+        run: ./scripts/test-windows-installer.ps1
+      - name: Include friend instructions
+        shell: pwsh
+        run: Copy-Item 'packaging/windows/START HERE.txt' 'dist/installers/START HERE.txt'
       - uses: actions/upload-artifact@v4
         with:
           name: MoteField-Windows-x64-UNSIGNED

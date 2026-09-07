@@ -60,12 +60,54 @@ struct HostParameterObserver final : juce::AudioProcessorParameter::Listener
     void parameterGestureChanged (int, bool starting) override { starting ? ++starts : ++ends; }
 };
 
+void checkAppearance (MoteFieldAudioProcessorEditor& editor, const juce::File& destination)
+{
+    const auto acid = juce::Colour (appearance::acid);
+    require (appearance::read(editor).cyan == acid, "Acid is not the default accent");
+    MoteFieldAudioProcessor secondProcessor;
+    std::unique_ptr<MoteFieldAudioProcessorEditor> second (static_cast<MoteFieldAudioProcessorEditor*>(secondProcessor.createEditor()));
+    click (editor,"settings");
+    auto* hex=dynamic_cast<juce::TextEditor*>(find(editor,"accent-hex"));
+    require (hex!=nullptr,"Settings has no custom accent input");
+    hex->setText ("#123");hex->onReturnKey();
+    require (appearance::read(editor).cyan==acid,"invalid hex changed appearance");
+    hex->setText ("#67CAED");hex->onReturnKey();
+    click (editor,"dark-mode");second->refreshDisplay();
+    require (appearance::read(editor).cyan==juce::Colour(0xff67caed),"custom accent did not apply");
+    require (appearance::read(second.operator*()).cyan==juce::Colour(0xff67caed),"open instances did not receive appearance");
+    require (appearance::read(editor).paper.getBrightness()<.5f,"dark mode did not apply");
+    saveImage (editor,destination.getChildFile("motefield-settings.png"));
+    click (editor,"settings-close");
+    require (!find(editor,"settings-panel")->isVisible(),"Settings did not close");
+    { appearance::Preferences restored;
+      require (restored.dark && restored.accent==juce::Colour(0xff67caed),"appearance did not persist to disk"); }
+    saveImage (editor,destination.getChildFile("motefield-dark-custom.png"));
+    click(editor,"settings");click(editor,"appearance-reset");click(editor,"settings-close");
+    saveImage (editor,destination.getChildFile("motefield-dark-acid.png"));
+    click(editor,"settings");click(editor,"dark-mode");click(editor,"settings-close");
+    require (appearance::read(editor).cyan==acid,"Acid reset failed");
+    for (const auto size : {juce::Point<int>(640,384),{1000,600},{1620,972}})
+    {
+        editor.setSize(size.x,size.y);click(editor,"settings");
+        auto* panel=find(editor,"settings-panel");
+        for (auto* child:panel->getChildren()) require (panel->getLocalBounds().contains(child->getBounds()),"Settings control clipped at small size");
+        click(editor,"settings-close");
+    }
+    editor.setSize(1000,600);
+    std::cout << "Appearance checks passed: Acid default, custom hex, invalid input, dark mode, open instances, disk persistence, reset and small windows.\n";
+}
+
 void checkMaterialResponse (const juce::File& destination)
 {
     FieldDisplay display;display.setSize (718, 198);display.setSampleRate (48000.0);
     motefield::VisualFrame frame;display.update (frame);
     const auto snapshot = [&] { return display.createComponentSnapshot (display.getLocalBounds()); };
     const auto rest = snapshot();
+    juce::Rectangle<int> restingBounds;
+    for(int y=0;y<rest.getHeight();++y)for(int x=0;x<480;++x)
+        if(rest.getPixelAt(x,y).getAlpha()>128) restingBounds=restingBounds.getUnion({x,y,1,1});
+    require(restingBounds.getWidth()>60 && std::abs(restingBounds.getWidth()-restingBounds.getHeight())<5,
+            "resting reactor must be a round fluid volume, not a logo silhouette");
     const auto changed = [] (const juce::Image& a, const juce::Image& b)
     {
         int result = 0;
@@ -91,6 +133,14 @@ void checkMaterialResponse (const juce::File& destination)
     frame.outputLevel = 0.f;frame.spectralEnergy = {};
     for (int i = 0; i < 300; ++i) { frame.sampleTime += 800;display.update (frame); }
     require (changed (rest, snapshot()) == 0, "material did not return to its resting surface");
+    frame.mode=motefield::Mode::orbit;frame.voiceCount=2;
+    frame.voices[0].id=1;frame.voices[0].level=.3f;frame.voices[0].envelope=1.f;frame.voices[0].phase=.05f;
+    frame.voices[1]=frame.voices[0];frame.voices[1].id=2;frame.voices[1].phase=.55f;
+    for(int i=0;i<120;++i){frame.sampleTime+=800;display.update(frame);}
+    const auto voicesFirst=snapshot();
+    frame.voices[0].phase=.3f;frame.voices[1].phase=.8f;
+    for(int i=0;i<120;++i){frame.sampleTime+=800;display.update(frame);}
+    require(changed(voicesFirst,snapshot())>800,"voice motion did not reshape the reactor with unchanged meters");
     std::cout << "Material checks passed: distinct bass/mid/treble deformation, snapshot-gap stability and silence settling.\n";
 }
 
@@ -233,7 +283,112 @@ int main (int argc, char** argv)
         juce::ScopedJuceInitialiser_GUI gui;
         const juce::File destination (argc > 1 ? juce::String (argv[1]) : juce::File::getCurrentWorkingDirectory().getChildFile ("Design").getFullPathName());
         require (destination.createDirectory().wasOk(), "cannot create preview directory");
+        const auto appearanceFile=destination.getNonexistentChildFile ("appearance-test", ".settings");
+        #if JUCE_WINDOWS
+        _putenv_s ("MOTEFIELD_APPEARANCE_FILE", appearanceFile.getFullPathName().toRawUTF8());
+        #else
+        setenv ("MOTEFIELD_APPEARANCE_FILE", appearanceFile.getFullPathName().toRawUTF8(),1);
+        #endif
         MoteFieldAudioProcessor processor;
+        if (argc > 2 && juce::String (argv[2]) == "--appearance-only")
+        {
+            processor.prepareToPlay(48000,400); processor.applyFactoryPreset(17);
+            PlayHead head;processor.setPlayHead(&head);
+            std::unique_ptr<MoteFieldAudioProcessorEditor> editor(static_cast<MoteFieldAudioProcessorEditor*>(processor.createEditor()));
+            editor->setVisible(true);editor->setSize(1620,972);
+            juce::AudioBuffer<float> block(2,400);juce::MidiBuffer midi;
+            processor.requestLooperCommand(motefield::LooperCommand::record);
+            for(int chunk=0;chunk<240;++chunk)
+            {
+                for(int sample=0;sample<400;++sample) for(int channel=0;channel<2;++channel) block.setSample(channel,sample,pluck(chunk*400+sample));
+                if(chunk==200) processor.requestLooperCommand(motefield::LooperCommand::play);
+                processor.processBlock(block,midi);editor->refreshDisplay();
+            }
+            saveImage(*editor,destination.getChildFile("motefield-light-acid.png"));
+            checkAppearance(*editor,destination);
+            return 0;
+        }
+        if (argc > 2 && juce::String (argv[2]) == "--print-only")
+        {
+            processor.prepareToPlay (48000.0, 400); processor.applyFactoryPreset (17);
+            PlayHead playhead; processor.setPlayHead (&playhead);
+            std::unique_ptr<MoteFieldAudioProcessorEditor> editor (static_cast<MoteFieldAudioProcessorEditor*> (processor.createEditor()));
+            editor->setSize (1364, 880); editor->setVisible (true);
+            editor->getProperties().set ("facePreview", 1);
+            juce::AudioBuffer<float> block (2, 400); juce::MidiBuffer midi;
+            for (int chunk = 0; chunk < 240; ++chunk)
+            {
+                for (int i = 0; i < 400; ++i) for (int c = 0; c < 2; ++c) block.setSample (c, i, pluck (chunk * 400 + i));
+                processor.processBlock (block, midi); editor->refreshDisplay();
+            }
+            juce::Image comparison (juce::Image::RGB, 1920, 1060, true);
+            juce::Graphics g (comparison); g.fillAll (juce::Colour (0xffe8e2d0));
+            g.setColour (juce::Colour (0xff22261f)); g.setFont (juce::FontOptions (34.f));
+            g.drawText ("MoteField / print studies", 36, 22, 1500, 55, juce::Justification::centredLeft);
+            auto names = juce::StringArray::fromLines (destination.getChildFile ("titles.txt").loadFileAsString());
+            names.removeEmptyStrings();
+            if (names.size() != 3) names = { "01 / ORGANIC SCATTER", "02 / LIQUID RIBBONS", "03 / BOLD HIDE" };
+            auto captions = juce::StringArray::fromLines (destination.getChildFile ("captions.txt").loadFileAsString());
+            captions.removeEmptyStrings();
+            if (captions.size() != 3) captions = { "Separate, uneven islands of ink.", "Longer shapes connect the control groups.", "Larger patches and stronger contrast." };
+            for (int option = 0; option < 3; ++option)
+            {
+                const auto svg = destination.getChildFile ("print-0" + juce::String (option + 1) + ".svg").loadFileAsString();
+                require (svg.isNotEmpty(), "missing print source");
+                editor->getProperties().set ("printPreviewSVG", svg); editor->resized();
+                saveImage (*editor, destination.getChildFile ("print-0" + juce::String (option + 1) + ".png"));
+                const auto shot = editor->createComponentSnapshot (editor->getLocalBounds());
+                const int x = 36 + option * 630;
+                g.setColour (juce::Colour (0xff22261f)); g.setFont (juce::FontOptions (22.f, juce::Font::bold));
+                g.drawText (names[option], x, 111, 590, 35, juce::Justification::centredLeft);
+                g.drawImageWithin (shot, x, 168, 588, 380, juce::RectanglePlacement::centred);
+                const auto detail = shot.getClippedImage ({45,110,810,399}).createCopy();
+                g.drawImageWithin (detail, x, 590, 588, 290, juce::RectanglePlacement::centred);
+                g.setFont (juce::FontOptions (16.f));
+                g.drawText (captions[option], x, 907, 590, 50, juce::Justification::centredLeft);
+            }
+            auto stream = destination.getChildFile ("MoteField-Print-Options.png").createOutputStream();
+            require (stream != nullptr, "cannot create print comparison"); stream->setPosition (0); stream->truncate();
+            require (juce::PNGImageFormat().writeImageToStream (comparison,*stream), "print comparison failed");
+            std::cout << "Three native print studies captured.\n"; return 0;
+        }
+        if (argc > 2 && juce::String (argv[2]) == "--faces-only")
+        {
+            processor.prepareToPlay (48000.0, 400); processor.applyFactoryPreset (17);
+            PlayHead playhead; processor.setPlayHead (&playhead);
+            std::unique_ptr<MoteFieldAudioProcessorEditor> editor (static_cast<MoteFieldAudioProcessorEditor*> (processor.createEditor()));
+            editor->setSize (1364, 880); editor->setVisible (true);
+            juce::AudioBuffer<float> block (2, 400); juce::MidiBuffer midi;
+            for (int chunk = 0; chunk < 240; ++chunk)
+            {
+                for (int i = 0; i < 400; ++i) for (int channel = 0; channel < 2; ++channel) block.setSample (channel, i, pluck (chunk * 400 + i));
+                processor.processBlock (block, midi); editor->refreshDisplay();
+            }
+            juce::Image comparison (juce::Image::RGB, 1920, 1040, true);
+            juce::Graphics g (comparison); g.fillAll (juce::Colour (0xffe8e2d0));
+            const juce::StringArray names { "01 / MILK GLASS", "02 / CLEAR WARM GLASS", "03 / SMOKED GLASS" };
+            g.setColour (juce::Colour (0xff22261f)); g.setFont (juce::FontOptions (35.f));
+            g.drawText ("MoteField / face studies", 48, 25, 1400, 54, juce::Justification::centredLeft);
+            g.setFont (juce::FontOptions (18.f)); g.drawText ("Same instrument. Three glass finishes for the effect selector.", 48, 85, 1400, 30, juce::Justification::centredLeft);
+            for (int finish = 0; finish < 3; ++finish)
+            {
+                editor->getProperties().set ("facePreview", finish); editor->resized();
+                saveImage (*editor, destination.getChildFile ("face-0" + juce::String (finish + 1) + ".png"));
+                const auto shot = editor->createComponentSnapshot (editor->getLocalBounds());
+                const auto plate = shot.getClippedImage ({864,114,463,421}).createCopy();
+                auto stream = destination.getChildFile ("panel-0" + juce::String (finish + 1) + ".png").createOutputStream();
+                require (stream != nullptr, "cannot create face detail"); stream->setPosition (0); stream->truncate(); juce::PNGImageFormat().writeImageToStream (plate,*stream);
+                const int x = 48 + finish * 624;
+                g.setColour (juce::Colour (0xff22261f)); g.setFont (juce::FontOptions (21.f, juce::Font::bold));
+                g.drawText (names[finish], x, 156, 580, 32, juce::Justification::centredLeft);
+                g.drawImageWithin (plate, x, 213, 576, 526, juce::RectanglePlacement::centred);
+                g.drawImageWithin (shot, x, 765, 370, 240, juce::RectanglePlacement::xLeft | juce::RectanglePlacement::yMid);
+            }
+            auto stream = destination.getChildFile ("MoteField-Face-Options.png").createOutputStream();
+            require (stream != nullptr, "cannot create comparison"); stream->setPosition (0); stream->truncate();
+            require (juce::PNGImageFormat().writeImageToStream (comparison,*stream), "face comparison failed");
+            std::cout << "Three native face studies captured.\n"; return 0;
+        }
         checkPerformanceIntegration (destination);
         processor.prepareToPlay (48000.0, 400);
         PlayHead playhead;
@@ -294,7 +449,7 @@ int main (int argc, char** argv)
             require (std::abs (value (motefield::parameter::mode) - static_cast<float> (i)) < .01f, "mode dial did not reach host parameter");
             auto* label = find (*editor, "mode-" + juce::String (i));
             const auto delta = label->getBounds().getCentre().toFloat() - modeDial->getBounds().getCentre().toFloat();
-            const auto angle = (-150.f + static_cast<float> (i) * 30.f) * juce::MathConstants<float>::pi / 180.f;
+            const auto angle = (-120.f + static_cast<float> (i) * 30.f) * juce::MathConstants<float>::pi / 180.f;
             const auto alignment = (delta.x * std::sin (angle) - delta.y * std::cos (angle)) / delta.getDistanceFromOrigin();
             require (alignment > .999f, "mode pointer is not aligned with its effect label");
             for (int j = i + 1; j < 11; ++j)
@@ -332,9 +487,34 @@ int main (int argc, char** argv)
         require (processor.getLooperState() == motefield::LooperState::overdubbing, "dub control failed");
         click (*editor, "stop"); processSilence();
         require (processor.getLooperState() == motefield::LooperState::stopped, "stop control failed");
+        {
+            const std::set<juce::String> randomized { "mode","variation","density","repeats","shape","cutoff","mix","space","modDepth","modRate","resonance","division","reverbStyle","reverse" };
+            std::vector<std::pair<juce::String,float>> protectedValues;
+            for(auto* parameter:processor.getParameters())
+                if(auto* ranged=dynamic_cast<juce::RangedAudioParameter*>(parameter);ranged && !randomized.count(ranged->paramID))
+                    protectedValues.emplace_back(ranged->paramID,ranged->getValue());
+            const auto phrase=processor.loopData();
+            HostParameterObserver randomHost;auto* shapeParam=processor.parameters.getParameter(motefield::parameter::shape);
+            shapeParam->addListener(&randomHost);click(*editor,"random-preset");shapeParam->removeListener(&randomHost);
+            require(randomHost.starts==1 && randomHost.ends==1 && randomHost.values>0,"Random did not send host gestures");
+            for(const auto& entry:protectedValues)
+                require(processor.parameters.getParameter(entry.first)->getValue()==entry.second,"Random changed a protected performance parameter");
+            require(processor.loopData()==phrase && processor.getLooperState()==motefield::LooperState::stopped,"Random changed recorded audio or transport");
+            processor.randomizeSound(42);const auto firstShape=value(motefield::parameter::shape);
+            processor.randomizeSound(99);require(value(motefield::parameter::shape)!=firstShape,"Random did not create a different sound");
+            processor.randomizeSound(42);require(value(motefield::parameter::shape)==firstShape,"Random seed is not repeatable");
+            require(value(motefield::parameter::repeats)<=.761f && value(motefield::parameter::cutoff)>=1800.f,"Random exceeded musical ranges");
+            const auto folder=destination.getNonexistentChildFile("random-preset-check",{},false);
+            require(processor.saveUserPreset("Random test",false,folder).wasOk(),"Random sound could not be saved");
+            processor.randomizeSound(87);
+            require(processor.loadUserPreset(folder.getChildFile("Random test.motefield")).wasOk() && std::abs(value(motefield::parameter::shape)-firstShape)<.0001f,"Random preset did not recall");
+            std::cout<<"Random checks passed: new sounds, host gestures, preserved loop/performance, repeatable seeds and user save/recall.\n";
+        }
         click (*editor, "erase"); processSilence();
         require (processor.getLooperState() == motefield::LooperState::empty, "erase control failed");
+        checkAppearance (*editor,destination);
         checkPresetsAndAutomation (processor, destination);
+        require (appearance::read(*editor).cyan==juce::Colour(appearance::acid),"sound preset reset appearance");
         checkMaterialResponse (destination);
         auto* presets = dynamic_cast<juce::ComboBox*> (find (*editor, "presets"));
         require (presets != nullptr, "preset selector missing");
@@ -347,7 +527,7 @@ int main (int argc, char** argv)
         const auto closedSize = editor->getLocalBounds();
         click (*editor, "details");
         require (editor->getHeight() <= closedSize.getHeight() && editor->getWidth() <= closedSize.getWidth(), "Details expanded beyond the existing window");
-        require (std::abs (static_cast<double> (editor->getWidth()) / editor->getHeight() - 1240.0 / 990.0) < .003, "Details aspect ratio is incorrect");
+        require (std::abs (static_cast<double> (editor->getWidth()) / editor->getHeight() - 1620.0 / 1220.0) < .003, "Details aspect ratio is incorrect");
         auto* outputKnob = find (*editor, motefield::parameter::output);
         require (outputKnob != nullptr && outputKnob->isVisible() && outputKnob->getParentComponent()->isVisible(), "Details drawer did not open");
         require (editor->getLocalBounds().contains (editor->getLocalArea (outputKnob, outputKnob->getLocalBounds())), "Details output knob is clipped");
@@ -355,7 +535,7 @@ int main (int argc, char** argv)
             if (child->isVisible()) require (editor->getLocalBounds().contains (child->getBounds()), "Details contains a clipped control");
         saveImage (*editor, destination.getChildFile ("motefield-details.png"));
         click (*editor, "details");
-        editor->setSize (1000, 645);
+        editor->setSize (1000, 600);
         saveImage (*editor, destination.getChildFile ("motefield-small.png"));
         click (*editor,"perform");
         auto* panel = find (*editor,"performance-panel"); require (panel != nullptr && panel->isVisible(),"performance panel did not open");
@@ -364,7 +544,7 @@ int main (int argc, char** argv)
         for (int page = 1; page <= 3; ++page)
         { pages->setSelectedId (page,juce::sendNotificationSync); saveImage (*editor,destination.getChildFile ("motefield-perform-" + juce::String (page) + ".png")); }
         click (*editor,"perform-close"); require (! panel->isVisible(),"performance panel did not close");
-        editor->setSize (1240, 800);
+        editor->setSize (1620, 972);
         std::cout << "UI checks passed: 11 modes, 4 variations, synced/manual Time, performance pads, state restore, looper controls, Details and resizing.\n";
         if (argc > 2 && juce::String (argv[2]) == "--stills-only")
         {

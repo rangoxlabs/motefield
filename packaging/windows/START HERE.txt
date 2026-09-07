@@ -1,0 +1,34 @@
+MOTEFIELD 0.3.3 / RANGO LABS / WINDOWS TEST BUILD
+
+For Windows 10/11 with a 64-bit VST3-compatible DAW on Intel/AMD.
+This package is not the Mac version. Native Windows ARM testing is pending.
+
+1. Extract the ZIP. Save your session and close your DAW.
+2. Run MoteField-0.3.3-Windows-x64-UNSIGNED.exe.
+3. Approve the administrator prompt and complete installation.
+4. Reopen your DAW and rescan VST3 plugins. Look for MoteField by Rango Labs.
+5. Load it on an audio track receiving sound, choose First Light, and raise Mix.
+
+The installer puts the plugin here:
+C:\Program Files\Common Files\VST3\MoteField.vst3
+
+Use the DAW's standard/system VST3 scan. Do not open the .vst3 as an app.
+The UI includes the reactive fluid, RANDOM sound generator, user preset SAVE,
+recorded-loop display, custom accent colors, and dark mode in Settings.
+
+PRIVATE TEST BUILD
+This installer is not code-signed. Windows may show an unknown-publisher or
+SmartScreen reputation warning. Only proceed with the file received directly
+from Rango Labs. If Windows offers More info > Run anyway, that applies to this
+individual installer. Do not disable Defender or SmartScreen globally.
+If a managed-device policy or Smart App Control blocks installation, send us
+the exact message; this installer does not override those controls.
+
+UNINSTALL
+Use Windows Settings > Apps > Installed apps (Apps & features on Windows 10),
+find MoteField, and select Uninstall. Quit the DAW first.
+
+FEEDBACK
+Send your Windows version, DAW/version, preset name, and what happened.
+The build and automated checks run on Windows; real DAW playback on your
+machine is the next test. Keep a copy of important projects when testing.

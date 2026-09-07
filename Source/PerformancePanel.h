@@ -1,5 +1,6 @@
 #pragma once
 #include "PluginProcessor.h"
+#include "Appearance.h"
 
 class WaveDragButton final : public juce::TextButton
 {
@@ -102,8 +103,22 @@ public:
         startTimerHz (10);
     }
     ~PerformancePanel() override { stopTimer(); if (burstDown) processor.setParameterValue ("burstGate",0.f); }
+    void lookAndFeelChanged() override
+    {
+        const auto p = appearance::read (*this);
+        for (auto& row : rows)
+        {
+            row->label.setColour (juce::Label::textColourId,p.ink);
+            row->slider.setColour (juce::Slider::textBoxTextColourId,p.ink);
+            row->slider.setColour (juce::Slider::textBoxBackgroundColourId,p.paper);
+            row->slider.setColour (juce::Slider::thumbColourId,p.cyan);
+        }
+        instructions.setColour (juce::Label::textColourId,p.muted);
+        status.setColour (juce::Label::textColourId,p.ink);
+        viewport.getVerticalScrollBar().setColour (juce::ScrollBar::thumbColourId,p.muted);
+    }
     void paint (juce::Graphics& g) override
-    { g.fillAll (juce::Colour (0xffe8e0c9)); g.setColour (juce::Colour (0xff24281e)); g.drawRoundedRectangle (getLocalBounds().toFloat().reduced (2), 14, 3); }
+    { const auto p=appearance::read (*this); g.fillAll (p.paper); g.setColour (p.line); g.drawRoundedRectangle (getLocalBounds().toFloat().reduced (2),14,2); }
     void resized() override
     {
         auto area = getLocalBounds().reduced (18); auto top = area.removeFromTop (36);

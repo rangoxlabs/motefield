@@ -398,6 +398,29 @@ juce::StringArray MoteFieldAudioProcessor::factoryPresetNames()
         "Fault Lines", "Loose Wires", "Half Steps", "Stairwell", "Clock Garden", "Cross Streets", "Ink Wash", "Night Tide", "Open Water" };
 }
 
+void MoteFieldAudioProcessor::randomizeSound (juce::int64 seed)
+{
+    using namespace motefield::parameter;
+    juce::Random random(seed);
+    const auto range=[&](float low,float high){return juce::jmap(random.nextFloat(),low,high);};
+    // Musical starting ranges; performance, output gain and recorded audio are retained.
+    setParameterValue(mode,static_cast<float>(random.nextInt(11)));
+    setParameterValue(variation,static_cast<float>(random.nextInt(4)));
+    setParameterValue(density,range(.22f,.88f));
+    setParameterValue(repeats,range(.20f,.76f));
+    setParameterValue(shape,range(.08f,.92f));
+    setParameterValue(cutoff,std::exp(range(std::log(1800.f),std::log(18000.f))));
+    setParameterValue(mix,range(.30f,.72f));
+    setParameterValue(space,range(.08f,.55f));
+    setParameterValue(modDepth,range(0.f,.30f));
+    setParameterValue(modRate,std::exp(range(std::log(.06f),std::log(1.8f))));
+    setParameterValue(resonance,range(.02f,.35f));
+    setParameterValue(division,static_cast<float>(random.nextInt(9)));
+    setParameterValue(reverbStyle,static_cast<float>(random.nextInt(4)));
+    setParameterValue(reverse,random.nextBool()?1.f:0.f);
+    rememberPreset("Random sound", "generated");
+}
+
 void MoteFieldAudioProcessor::applyFactoryPreset (int index)
 {
     using namespace motefield::parameter;

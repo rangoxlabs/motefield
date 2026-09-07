@@ -1,0 +1,41 @@
+MOTEFIELD 0.3.3 / RANGO LABS / WINDOWS TEST ZIP
+
+For Windows 10/11, Intel/AMD x64, and a 64-bit VST3-compatible DAW.
+This is the Windows build. The Mac ZIP cannot run on Windows.
+
+1. Extract the ENTIRE ZIP into a folder. Do not run it inside the ZIP viewer.
+2. Save your session and quit your DAW.
+3. Double-click Install.cmd. Keep it beside Install.ps1, SHA256SUMS.json,
+   and the Plug-ins folder.
+4. Approve the Windows administrator prompt. Type y when the installer asks.
+5. Wait for Installed successfully. Reopen your DAW and rescan VST3 plug-ins.
+   Look for MoteField by Rango Labs. Start with First Light on an audio track.
+
+The script verifies checksums, backs up any previous MoteField copy, then
+copies the plugin into the standard system VST3 folder:
+C:\Program Files\Common Files\VST3\MoteField.vst3
+
+The script's PowerShell execution setting applies only to that process;
+it does not change your computer's saved execution policy or disable Defender.
+This is an unsigned private test build. Only run it when received directly
+from Rango Labs. Windows may ask for confirmation; if a managed-device policy
+blocks it, send us the exact message instead of turning off security controls.
+
+MANUAL COPY ALTERNATIVE
+If you prefer not to run the script, copy the whole MoteField.vst3 folder from
+Plug-ins into C:\Program Files\Common Files\VST3, approving the admin prompt.
+Back up an older MoteField.vst3 before replacing it. Keep its internal folders
+intact. Rescan your DAW. Do not double-click the .vst3 to launch it.
+
+UNINSTALL / RESTORE
+Quit the DAW, then remove only MoteField.vst3 from the location above.
+The script stores older copies in C:\ProgramData\Rango Labs\MoteField\Backups.
+To restore one, copy that backed-up bundle into the VST3 folder and rename it
+MoteField.vst3. Rescan your DAW. Leave other plugins alone.
+
+WHAT'S INCLUDED
+The reactive pearl-fluid interface, RANDOM sound generator, SAVE/user presets,
+recorded-loop display, custom accent color, and dark mode.
+
+If there is an issue, send us your Windows version, DAW/version, preset,
+and exact error. Windows ARM and real DAW playback remain to be qualified.

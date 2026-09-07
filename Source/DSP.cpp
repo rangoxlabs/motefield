@@ -146,6 +146,7 @@ struct Grain
     float pan = 0.0f;
     float envelopePower = 1.0f;
     float readSpan = 96000.f, tone = 1.f, filterStateL = 0.f, filterStateR = 0.f;
+    float edgeSamples = 144.f;
 
     void start (double newDelay,
                 double startRate,
@@ -184,11 +185,20 @@ struct Grain
         }
 
         const auto hann = std::sin (pi * clamp (phase, 0.0f, 1.0f));
-        const auto envelope = std::pow (std::max (hann, 0.0f), clamp (envelopePower + (material.tension - .5f) * 3.f, .2f, 6.f)) * gain;
+        const auto stretch = clamp (material.fieldStretch, .25f, 4.f);
+        const auto effectiveRate = rate * std::pow (2.0, material.fieldPitch / 12.0);
+        const auto offset = material.fieldPosition * std::min (static_cast<float> (ring.available()) * .35f, readSpan);
+        const auto readDelay = delay + offset;
+        const auto edgeWidth = edgeSamples * std::max (1.0, std::abs ((captureHeadIsMoving ? 1.0 : 0.0) - effectiveRate));
+        const auto smoothEdge = [] (float x) { x = clamp (x, 0.f, 1.f); return x * x * (3.f - 2.f * x); };
+        // Release before the read head leaves valid audio, including octave-up and held grains.
+        // A short safety ramp also bounds the edge slope for very flat Shape envelopes.
+        const auto readEdge = smoothEdge (static_cast<float> (std::min (readDelay, ring.available() - 2.0 - readDelay) / edgeWidth));
+        const auto ageEdge = smoothEdge (std::min (age, duration - age) * stretch / edgeSamples);
+        const auto envelope = std::pow (std::max (hann, 0.0f), clamp (envelopePower + (material.tension - .5f) * 3.f, .2f, 6.f)) * gain * readEdge * ageEdge;
         const auto panAngle = (clamp (pan * (1.5f - material.cohesion), -1.f, 1.f) + 1.0f) * pi * 0.25f;
         const auto gainL = std::cos (panAngle) * 1.41421356f;
         const auto gainR = std::sin (panAngle) * 1.41421356f;
-        const auto offset = material.fieldPosition * std::min (static_cast<float> (ring.available()) * .35f, readSpan);
         filterStateL += tone * (ring.read (0, delay + offset) - filterStateL);
         filterStateR += tone * (ring.read (1, delay + offset) - filterStateR);
         const auto sampleL = filterStateL * envelope * gainL;
@@ -199,7 +209,7 @@ struct Grain
 
         age += 1.0f / clamp (material.fieldStretch, .25f, 4.f);
         rate += rateDelta / clamp (material.fieldStretch, .25f, 4.f);
-        delay += (captureHeadIsMoving ? 1.0 : 0.0) - rate * std::pow (2.0, material.fieldPitch / 12.0);
+        delay += (captureHeadIsMoving ? 1.0 : 0.0) - effectiveRate;
     }
 };
 
@@ -880,9 +890,22 @@ public:
             const auto fadeStep = p.loopFade > .001f ? 1.f / (p.loopFade * static_cast<float> (sampleRate)) : 1.f;
             fadeGain = stopping ? std::max (0.f, fadeGain - (fadeOut ? fadeStep : 1.f)) : std::min (1.f, fadeGain + (fadeIn ? fadeStep : 1.f));
             const auto a = static_cast<int> (position), b = (a + 1) % length; const auto t = static_cast<float> (position - a);
-            const auto edge = 1.f;
-            outL += lerp (data.read (0, a), data.read (0, b), t) * p.looperLevel * fadeGain * edge;
-            outR += lerp (data.read (1, a), data.read (1, b), t) * p.looperLevel * fadeGain * edge;
+            // Reconcile endpoint offsets over a short playback-time splice. The raw recording,
+            // sample count, tempo and undo layers remain untouched; forward and reverse share it.
+            const auto seamWidth = std::max (1.0, std::min (length * .25, sampleRate * .005 * std::max (.25f, speedSmooth)));
+            const auto seamWeight = [length, seamWidth] (int index)
+            {
+                const auto distance = std::min (index, length - 1 - index);
+                const auto x = static_cast<float> (clamp (1.0 - distance / seamWidth, 0.0, 1.0));
+                return .5f * x * x * (3.f - 2.f * x) * (index < length / 2 ? -1.f : 1.f);
+            };
+            const auto wa = seamWeight (a), wb = seamWeight (b);
+            for (int c = 0; c < 2; ++c)
+            {
+                const auto mismatch = data.read (c, 0) - data.read (c, length - 1);
+                const auto loop = lerp (data.read (c, a) + mismatch * wa, data.read (c, b) + mismatch * wb, t) * p.looperLevel * fadeGain;
+                (c == 0 ? outL : outR) += loop;
+            }
             if (st == LooperState::overdubbing)
             {
                 const auto i = clamp (static_cast<int> (std::llround (position)), 0, length - 1);
@@ -989,6 +1012,7 @@ struct Engine::Impl
         sequenceStep = 0;
         feedbackL = feedbackR = 0.0f;
         smoothedMix = 0.5f;
+        grainNormalizer = 1.f;
         smoothedCutoff = 18000.0f;
         smoothedOutput = 1.0f;
         smoothedBypass = 0.0f;
@@ -1034,11 +1058,9 @@ struct Engine::Impl
             if (! grain.active)
                 return &grain;
 
-        auto* oldest = &grains[0];
-        for (auto& grain : grains)
-            if (grain.age / grain.duration > oldest->age / oldest->duration)
-                oldest = &grain;
-        return oldest;
+        // Keep the fixed CPU budget without truncating a sounding voice at a nonzero sample.
+        // At capacity, let existing envelopes finish before admitting another grain.
+        return nullptr;
     }
 
     double recentOnsetDelay (int offset) const noexcept
@@ -1203,6 +1225,8 @@ struct Engine::Impl
             const auto pan = voices == 1 ? random.bipolar() * 0.25f
                                          : -0.8f + 1.6f * static_cast<float> (voice) / static_cast<float> (voices - 1);
             auto* grain = findFreeGrain();
+            if (grain == nullptr) continue;
+            grain->edgeSamples = static_cast<float> (sampleRate * .003);
             grain->id = ++voiceSequence;
             grain->start (readDelay + voice * 7.0,
                                     rates.first,
@@ -1332,7 +1356,9 @@ struct Engine::Impl
                     if (grain.active)
                         ++active;
                 }
-                const auto normalizer = active > 0 ? 1.0f / std::sqrt (1.0f + 0.12f * static_cast<float> (active)) : 1.0f;
+                const auto targetNormalizer = active > 0 ? 1.0f / std::sqrt (1.0f + 0.12f * static_cast<float> (active)) : 1.0f;
+                grainNormalizer += (1.f - std::exp (-1.f / static_cast<float> (sampleRate * .003))) * (targetNormalizer - grainNormalizer);
+                const auto normalizer = grainNormalizer;
                 if (parameters.mode == Mode::smear)
                 {
                     effectL = effectL * 0.68f + grainL * 0.62f * normalizer;
@@ -1617,6 +1643,7 @@ struct Engine::Impl
     double spawnCountdown = 0.0;
     float feedbackL = 0.0f;
     float feedbackR = 0.0f;
+    float grainNormalizer = 1.f;
     float smoothedMix = 0.5f;
     float smoothedCutoff = 18000.0f;
     float smoothedOutput = 1.0f;

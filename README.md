@@ -2,11 +2,11 @@
 
 MoteField turns incoming audio into layered micro loops, granular textures, rhythmic glitches, and spatial repeats. It combines **11 effect modes**, A-D variations, **32 factory presets**, and a **60-second phrase looper** in a compact hardware-style interface.
 
-The worn cream enclosure, organic black print, and reactive Rango Labs mark surround a live ferrofluid-inspired display. The material follows the processed sound and active voices; the adjacent Shape guide shows the grain envelope.
+The clear enclosure, sculpted knob rails, and Acid lighting surround a pearl ferrofluid-inspired display. The floating fluid volume deforms, merges, and splits with processed sound and active voices; the adjacent Shape guide shows the grain envelope. Settings offers a custom accent color and dark mode, saved separately from sound presets.
 
 ![MoteField interface](docs/images/motefield.png)
 
-**Current version: 0.3.0 development.** Universal macOS VST3 and AU builds are installed and validated locally. The expanded DSP, processor, and native UI checks pass. See the verification record for platform limits. Windows x64 build and installer automation is included; Windows host compatibility is still being verified. This is a development release.
+**Current version: 0.3.3 development.** Universal macOS VST3 and AU builds are installed and validated locally. The expanded DSP, processor, and native UI checks pass. See the verification record for platform limits. Windows x64 build and installer automation is included; Windows host compatibility is still being verified. This is a development release.
 
 ## Included effects
 
@@ -82,6 +82,8 @@ Record up to 60 seconds and layer it independently of the selected effect.
 ## Presets and automation
 
 The preset menu has **Factory** and **User** submenus. Choose from 32 factory starting points covering all eleven modes, or use **Save** to name the current sound. Replacing an existing user preset requires confirmation. An asterisk marks changes from the selected preset, and its name is retained with the DAW session.
+
+**RANDOM**, beside the preset picker, creates a new sound across effect mode, variation, Activity, Shape, Filter, Mix, Repeats, Space, Drift, subdivision, reverb character, and FX reverse. It uses bounded starting ranges and sends parameter changes to the host. Recorded audio, looper settings, Hold, Bypass, tempo/sync, and output gain are retained. Click **SAVE** to keep the result as a user preset.
 
 User presets are portable `.motefield` files stored in:
 
@@ -211,3 +213,9 @@ See [verification](VERIFICATION.md) for completed checks and remaining platform 
 ## License
 
 Original source is available under the [MIT License](LICENSE). JUCE and its bundled dependencies retain their own licensing terms. Open Sauce Sans font notices are included in [Assets/OFL.txt](Assets/OFL.txt).
+
+### Appearance
+
+Acid is the default accent on the neutral light enclosure. Open **Settings** to switch **Dark mode** on or off, choose a color with the picker/RGB sliders, or enter a six-digit hex color. **Reset to Acid** restores the accent without changing the light/dark setting.
+
+The accent follows knob light rings, selected controls, the recorded-loop playhead, and audio-reactive silver-fluid reflections. Labels use contrasting neutral colors. Appearance is saved on this computer separately from sound presets and DAW automation; open instances in the same plugin process update together. The recorded-loop waveform remains visible on its dedicated lower strip.

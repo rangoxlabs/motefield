@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.22)
 
-project(MoteField VERSION 0.3.0 LANGUAGES C CXX)
+project(MoteField VERSION 0.3.3 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -40,7 +40,7 @@ juce_add_plugin(MoteField
     AU_MAIN_TYPE kAudioUnitType_Effect
 )
 
-juce_add_binary_data(RangoAssets SOURCES Assets/RangoLogo.png Assets/OpenSauceMedium.ttf Assets/OpenSauceBold.ttf Assets/HardwarePrint.svg)
+juce_add_binary_data(RangoAssets SOURCES Assets/RangoLogo.png Assets/OpenSauceMedium.ttf Assets/OpenSauceBold.ttf Assets/HardwarePrint.svg Assets/AcidEnclosure-v1.png Assets/AcidKnob-v1.png)
 juce_generate_juce_header(MoteField)
 
 target_sources(MoteField PRIVATE
@@ -51,6 +51,7 @@ target_sources(MoteField PRIVATE
     Source/Presets.cpp
     Source/Performance.cpp
     Source/PerformancePanel.h
+    Source/Appearance.h
     Source/PluginEditor.cpp
     Source/PluginEditor.h
 )
@@ -84,6 +85,14 @@ if(MOTEFIELD_BUILD_PREVIEW)
     target_link_libraries(MoteFieldPreview PRIVATE MoteField)
     target_include_directories(MoteFieldPreview PRIVATE Source $<TARGET_PROPERTY:MoteField,INCLUDE_DIRECTORIES>)
     target_compile_definitions(MoteFieldPreview PRIVATE $<TARGET_PROPERTY:MoteField,COMPILE_DEFINITIONS>)
+    add_executable(MoteFieldPromo Tests/Promo.cpp)
+    target_link_libraries(MoteFieldPromo PRIVATE MoteField)
+    target_include_directories(MoteFieldPromo PRIVATE Source $<TARGET_PROPERTY:MoteField,INCLUDE_DIRECTORIES>)
+    target_compile_definitions(MoteFieldPromo PRIVATE $<TARGET_PROPERTY:MoteField,COMPILE_DEFINITIONS>)
+    add_executable(MoteFieldDemo Tests/Demo.cpp)
+    target_link_libraries(MoteFieldDemo PRIVATE MoteField)
+    target_include_directories(MoteFieldDemo PRIVATE Source $<TARGET_PROPERTY:MoteField,INCLUDE_DIRECTORIES>)
+    target_compile_definitions(MoteFieldDemo PRIVATE $<TARGET_PROPERTY:MoteField,COMPILE_DEFINITIONS>)
 endif()
 if(MOTEFIELD_BUILD_TESTS)
     enable_testing()
@@ -100,4 +109,8 @@ if(MOTEFIELD_BUILD_TESTS)
         target_compile_options(MoteFieldDSPTests PRIVATE -Wall -Wextra -Wpedantic)
     endif()
     add_test(NAME MoteFieldDSPTests COMMAND MoteFieldDSPTests)
+    add_executable(MoteFieldClickTests Source/DSP.cpp Tests/ClickTests.cpp)
+    target_include_directories(MoteFieldClickTests PRIVATE Source)
+    target_compile_features(MoteFieldClickTests PRIVATE cxx_std_20)
+    add_test(NAME MoteFieldClickTests COMMAND MoteFieldClickTests)
 endif()

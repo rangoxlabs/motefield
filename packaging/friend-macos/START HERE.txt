@@ -70,6 +70,10 @@ folders. Reopen your DAW and rescan. Leave other plug-ins alone.
 
 THIS TEST BUILD
 
-This kit contains version @VERSION@. If using 0.2.6, phrase audio does not
-save with projects:
-record/render useful performances before closing your session.
+This kit contains version @VERSION@ with the approved clear Acid interface,
+restored reactive pearl fluid, knob lighting, custom accent colors and dark mode.
+RANDOM beside the preset picker creates a new sound; SAVE keeps it.
+Random retains your recorded loop, transport, tempo and output level.
+Open Settings to change appearance; these choices do not change your sound.
+The recorded-loop display shows your captured phrase and playback position.
+Loop audio can be recalled with projects and saved presets.
