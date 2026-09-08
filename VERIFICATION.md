@@ -7,7 +7,10 @@ Current release candidate adds stereo Width, Wet Solo, Level Match and stronger 
 - Direct probing of the installed 0.3.3 AU reproduced rejection of a stereo auxiliary input (-10868), while its stereo main input and auval passed. The candidate accepts both auxiliary channel formats. Actual Logic Pro stereo playback remains to be confirmed; Logic Pro is unavailable on this Mac.
 - Native integration/UI tests pass: 61 automatable parameters, monitor button attachments, Width preset recall, legacy session defaults, all main/aux bus combinations, no jumps beyond ongoing motion during snapshot gaps, frequency-driven deformation and silence settling. Native screenshots were inspected.
 - Universal macOS Release build and DSP/click tests pass (58.19 s / 8.09 s on the initial test run). Installed AU and VST3 report 0.3.4 and match staged binary hashes. AU validation passes; direct Audio Unit probing accepts and initializes stereo main input with both mono and stereo auxiliary inputs (all status 0).
-- Mac friend ZIP SHA-256: `4de3d20a43812382b367cd4b0c76c14182d0ba92dfbc18fc145026461824dccb`. Windows CI is pending for this commit.
+- Mac friend ZIP SHA-256: `4de3d20a43812382b367cd4b0c76c14182d0ba92dfbc18fc145026461824dccb`. Extracted ZIP passed clean install, reinstall backup, installed-binary identity and rejection of corrupt payloads before installation.
+- [Windows run 34248125689](https://github.com/rangoxlabs/motefield/actions/runs/34248125689) passed at `d02e28d`: native x64 build, DSP/click tests (21.79 s / 2.70 s), ZIP clean install/replacement/hash/corruption checks, and Inno installer/uninstaller checks.
+- Downloaded Windows ZIP and installer checksums verified. ZIP CRC, payload manifest, 0.3.4 module version and x64 PE architecture verified. Windows ZIP SHA-256: `9972fefa019f24bbd3a739cc67d26faab06b7d324f9729bbe16496549be0d476`.
+- Actual Logic Pro stereo playback, Intel Mac DAW playback, and Windows DAW playback remain host-specific validation items.
 
 ## Earlier verification records
 
