@@ -1,3 +1,16 @@
+# 0.3.4 verification
+
+Current release candidate adds stereo Width, Wet Solo, Level Match and stronger audio-driven reactor deformation. The optional Magnet sidechain now accepts disabled, mono or stereo layouts independently of the matching mono/stereo main buses.
+
+- DSP and click suites pass locally, including new checks for 0/100/200% mid/side width, mono transparency, fully wet equivalence, gain matching, silent-input behavior, bypass and unchanged POST recording.
+- Existing parameter IDs/order are retained; three automatable parameters are appended (61 total). Old sessions and presets default to Width 100%, with monitoring off for old sessions. Wet Solo and Level Match are session controls and are excluded from sound presets.
+- Direct probing of the installed 0.3.3 AU reproduced rejection of a stereo auxiliary input (-10868), while its stereo main input and auval passed. The candidate accepts both auxiliary channel formats. Actual Logic Pro stereo playback remains to be confirmed; Logic Pro is unavailable on this Mac.
+- Native integration/UI tests pass: 61 automatable parameters, monitor button attachments, Width preset recall, legacy session defaults, all main/aux bus combinations, no jumps beyond ongoing motion during snapshot gaps, frequency-driven deformation and silence settling. Native screenshots were inspected.
+- Universal macOS Release build and DSP/click tests pass (58.19 s / 8.09 s on the initial test run). Installed AU and VST3 report 0.3.4 and match staged binary hashes. AU validation passes; direct Audio Unit probing accepts and initializes stereo main input with both mono and stereo auxiliary inputs (all status 0).
+- Mac friend ZIP SHA-256: `4de3d20a43812382b367cd4b0c76c14182d0ba92dfbc18fc145026461824dccb`. Windows CI is pending for this commit.
+
+## Earlier verification records
+
 # Verification
 
 ## Version 0.3.3

@@ -7,7 +7,7 @@
 bool MoteFieldAudioProcessor::isPresetParameter (const juce::String& id)
 {
     // A sound preset never starts transport, freezes capture, or bypasses audio.
-    if (id == motefield::parameter::freeze || id == motefield::parameter::bypass || id == "burstGate") return false;
+    if (id == motefield::parameter::freeze || id == motefield::parameter::bypass || id == "burstGate" || id == "wetSolo" || id == "levelMatch") return false;
     for (const auto* trigger : motefield::parameter::looperTriggers) if (id == trigger) return false;
     return true;
 }
@@ -133,7 +133,7 @@ juce::Result MoteFieldAudioProcessor::loadUserPreset (const juce::File& file)
         if (const auto* ranged = dynamic_cast<const juce::RangedAudioParameter*> (parameter))
             if (isPresetParameter (ranged->paramID) && seen.count (ranged->paramID) == 0)
             {
-                if (document->getIntAttribute ("version") == 1 && std::find (extendedParameterIds().begin(), extendedParameterIds().end(), ranged->paramID) != extendedParameterIds().end())
+                if (ranged->paramID == "width" || (document->getIntAttribute ("version") == 1 && std::find (extendedParameterIds().begin(), extendedParameterIds().end(), ranged->paramID) != extendedParameterIds().end()))
                     values.emplace_back (parameters.getParameter (ranged->paramID), ranged->getDefaultValue());
                 else return juce::Result::fail ("This preset is incomplete. Your sound has not changed.");
             }

@@ -1,4 +1,4 @@
-MOTEFIELD 0.3.3 / RANGO LABS / WINDOWS TEST ZIP
+MOTEFIELD 0.3.4 / RANGO LABS / WINDOWS TEST ZIP
 
 For Windows 10/11, Intel/AMD x64, and a 64-bit VST3-compatible DAW.
 This is the Windows build. The Mac ZIP cannot run on Windows.
@@ -39,3 +39,7 @@ recorded-loop display, custom accent color, and dark mode.
 
 If there is an issue, send us your Windows version, DAW/version, preset,
 and exact error. Windows ARM and real DAW playback remain to be qualified.
+
+NEW IN 0.3.4
+Stereo Width, Wet Solo, Level Match, more responsive reactor motion, and
+preset arrows directly beside the preset box. All three new controls automate.

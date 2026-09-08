@@ -6,7 +6,7 @@ The clear enclosure, sculpted knob rails, and Acid lighting surround a pearl fer
 
 ![MoteField interface](docs/images/motefield.png)
 
-**Current version: 0.3.3 development.** Universal macOS VST3 and AU builds are installed and validated locally. The expanded DSP, processor, and native UI checks pass. See the verification record for platform limits. Windows x64 build, DSP/click tests, direct-install ZIP checks, and installer/uninstaller checks pass. Native Windows DAW playback is still being verified. This is a development release.
+**Current version: 0.3.4 development.** Available as universal macOS AU/VST3 and Windows x64 VST3 test builds. See [VERIFICATION.md](VERIFICATION.md) for checks and remaining host-specific validation.
 
 ## Included effects
 
@@ -39,6 +39,9 @@ Select an effect by turning the mode dial or clicking its name. The pointer alig
 | **Infinite reverb** | The longest-feedback and widest reverb character. Despite the name, its tail decays; use Hold to sustain captured material. |
 | **FX Reverse** | Reverses effect playback. It is independent of the phrase looper's reverse control. |
 | **Hold** | Stops replacing the recent capture while playback continues. In Grid and Smear, it captures and repeats the recent delay phrase. |
+| **Width** | Smooth stereo mid/side width: 0% mono, 100% original, 200% expanded sides. Also changes the reactor’s horizontal spread. |
+| **Wet Solo** | Auditions the fully wet live effect without changing Mix or writing the monitoring change into the looper. Existing POST recordings retain their recorded blend. |
+| **Level Match** | Measures three seconds of input/output RMS, then holds compensation (up to ±12 dB). Relearns after main sound-control changes and waits for signal during silence. |
 | **Mix / Output** | Blends dry and processed audio, then trims the effect output level. |
 | **Bypass** | Smoothly returns to the unprocessed input while the engine and phrase transport continue running. |
 
@@ -92,7 +95,7 @@ User presets are portable `.motefield` files stored in:
 
 Use **Refresh user presets** after copying files into that folder. User presets save 49 sound, timing, routing, and performance settings, plus recorded phrase audio when present. Hold, Bypass, and transport gates are excluded. Presets containing a phrase replace the current phrase; sound-only presets retain it. Earlier version-1 preset files remain readable, with defaults for the new controls. Factory presets retain the current timing/sync and looper configuration.
 
-All **58 exposed parameters** support host automation, including Mode, Variation, Hold, Bypass, and six looper command triggers. UI edits notify the host, allowing automation recording where the DAW supports it. Tap writes Tempo and Host Sync; display preferences are not audio parameters.
+All **61 exposed parameters** support host automation, including Mode, Variation, Hold, Bypass, and six looper command triggers. UI edits notify the host, allowing automation recording where the DAW supports it. Tap writes Tempo and Host Sync; display preferences are not audio parameters.
 
 Looper triggers execute on each **0-to-1 or 1-to-0 transition**. Alternate values for repeated commands; a held value does not retrigger. Commands apply at the next processing block, and repeated edges of the same command within a block coalesce. Avoid simultaneous conflicting transport commands. DAW-specific automation behavior still needs host testing.
 

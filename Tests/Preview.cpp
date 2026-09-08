@@ -115,11 +115,12 @@ void checkMaterialResponse (const juce::File& destination)
             if (a.getPixelAt (x, y) != b.getPixelAt (x, y)) ++result;
         return result;
     };
+    int lastMotionStep = 0;
     std::array<juce::Image, 3> bands;
     for (std::size_t band = 0; band < bands.size(); ++band)
     {
         frame.spectralEnergy = {};frame.spectralEnergy[band] = .16f;frame.outputLevel = .2f;
-        for (int i = 0; i < 120; ++i) { frame.sampleTime += 800;display.update (frame); }
+        for (int i = 0; i < 120; ++i) { const auto prior = i == 119 ? snapshot() : juce::Image {}; frame.sampleTime += 800;display.update (frame); if(i == 119)lastMotionStep=changed(prior,snapshot()); }
         bands[band] = snapshot();
         require (changed (rest, bands[band]) > 400, "main material did not react to audio band");
         const auto name = juce::StringArray { "bass", "mid", "treble" }[static_cast<int> (band)];
@@ -129,7 +130,7 @@ void checkMaterialResponse (const juce::File& destination)
     }
     require (changed (bands[0], bands[1]) > 400 && changed (bands[1], bands[2]) > 400, "audio bands produce the same material response");
     for (int i = 0; i < 3; ++i) display.update (frame);
-    require (changed (bands[2], snapshot()) < 100, "material flickered between audio snapshots");
+    require (changed (bands[2], snapshot()) < lastMotionStep * 4 + 100, "material jumped beyond its ongoing motion between audio snapshots");
     frame.outputLevel = 0.f;frame.spectralEnergy = {};
     for (int i = 0; i < 300; ++i) { frame.sampleTime += 800;display.update (frame); }
     require (changed (rest, snapshot()) == 0, "material did not return to its resting surface");
@@ -164,6 +165,7 @@ void checkPresetsAndAutomation (MoteFieldAudioProcessor& processor, const juce::
     processor.setParameterValue (looperSpeed, 2.f);
     processor.setParameterValue (looperOrder, 1.f);
     processor.setParameterValue (modDepth, .000001f);
+    processor.setParameterValue ("width", 1.63f);
     require (processor.saveUserPreset ("../escape", false, directory).failed(), "preset filename escaped its folder");
     require (processor.saveUserPreset ("CON", false, directory).failed(), "Windows reserved preset name accepted");
     require (processor.saveUserPreset ("Orbital test", false, directory).wasOk(), "user preset save failed");
@@ -181,6 +183,7 @@ void checkPresetsAndAutomation (MoteFieldAudioProcessor& processor, const juce::
     require (std::abs (processor.parameters.getRawParameterValue (tempo)->load() - 137.4f) < .11f, "user tempo did not round trip");
     require (processor.parameters.getRawParameterValue (looperSpeed)->load() == 2.f && processor.parameters.getRawParameterValue (looperOrder)->load() == 1.f, "loop routing did not round trip");
     require (processor.parameters.getRawParameterValue (freeze)->load() == 1.f && processor.parameters.getRawParameterValue (bypass)->load() == 1.f, "preset changed Hold or Bypass");
+    require (std::abs(processor.parameters.getRawParameterValue("width")->load()-1.63f)<.001f,"width did not round trip in preset");
     require (MoteFieldAudioProcessor::userPresetFiles (directory).size() == 1, "saved preset discovery failed");
     juce::MemoryBlock saved;
     processor.getStateInformation (saved);
@@ -195,7 +198,7 @@ void checkPresetsAndAutomation (MoteFieldAudioProcessor& processor, const juce::
     require (std::abs (processor.parameters.getRawParameterValue (shape)->load() - .8123f) < .0001f, "invalid preset partially changed sound");
     require (processor.saveUserPreset ("Orbital test", true, directory).wasOk(), "explicit replacement failed");
 
-    require (processor.getParameters().size() == 58, "host parameter count changed unexpectedly");
+    require (processor.getParameters().size() == 61, "host parameter count changed unexpectedly");
     std::set<juce::String> ids;
     for (auto* parameter : processor.getParameters())
     {
@@ -234,7 +237,7 @@ void checkPresetsAndAutomation (MoteFieldAudioProcessor& processor, const juce::
     trigger (3); require (processor.getLooperState() == motefield::LooperState::stopped, "host Stop trigger failed");
     trigger (5); require (processor.getLooperState() == motefield::LooperState::empty, "host Erase trigger failed");
     processor.setParameterValue (freeze, 0.f);processor.setParameterValue (bypass, 0.f);
-    std::cout << "Preset/automation checks passed: 32 factory presets, all 11 modes, disk round trip, overwrite protection, invalid-file rejection, session identity, 58 host parameters and looper triggers.\n";
+    std::cout << "Preset/automation checks passed: 32 factory presets, all 11 modes, disk round trip, overwrite protection, invalid-file rejection, session identity, 61 host parameters and looper triggers.\n";
 }
 void checkPerformanceIntegration (const juce::File& root)
 {
@@ -264,6 +267,21 @@ void checkPerformanceIntegration (const juce::File& root)
     juce::AudioBuffer<float> sideBlock (3,400); sideBlock.clear(); for (int i = 0; i < 400; ++i) sideBlock.setSample (2,i,.8f);
     reopened.setParameterValue ("magnetAmount",1); for (int tick = 0; tick < 4; ++tick) reopened.processBlock (sideBlock,midi);
     motefield::VisualFrame frame; reopened.readVisualFrame (frame); require (frame.magnet > 0,"sidechain did not reach engine");
+    for (const auto main : {juce::AudioChannelSet::mono(),juce::AudioChannelSet::stereo()})
+        for (const auto auxiliary : {juce::AudioChannelSet::disabled(),juce::AudioChannelSet::mono(),juce::AudioChannelSet::stereo()})
+        {
+            MoteFieldAudioProcessor instance; auto layout=instance.getBusesLayout();
+            layout.inputBuses.set(0,main);layout.outputBuses.set(0,main);layout.inputBuses.set(1,auxiliary);
+            require(instance.setBusesLayout(layout),"main/auxiliary mono-stereo negotiation failed");
+            instance.prepareToPlay(48000,128);instance.setParameterValue("magnetAmount",1.f);
+            juce::AudioBuffer<float> input(main.size()+auxiliary.size(),400);input.clear();
+            // Oversized block also exercises both auxiliary pointer offsets.
+            if(auxiliary.size()>0)for(int i=0;i<400;++i)input.setSample(main.size()+auxiliary.size()-1,i,.5f);
+            for(int tick=0;tick<4;++tick)instance.processBlock(input,midi);
+            motefield::VisualFrame telemetry;instance.readVisualFrame(telemetry);
+            if(auxiliary.size()>0)require(telemetry.magnet>.01f,"right-only sidechain was lost");
+            for(int ch=0;ch<main.size();++ch)for(int i=0;i<400;++i)require(std::isfinite(input.getSample(ch,i)),"non-finite layout output");
+        }
     require (p.saveUserPreset ("Loop archive",false,destination).wasOk(),"audio preset save failed");
     p.requestLooperCommand (motefield::LooperCommand::clear); tick();
     require (p.loadUserPreset (destination.getChildFile ("Loop archive.motefield")).wasOk(),"audio preset load failed"); tick();
@@ -469,14 +487,19 @@ int main (int argc, char** argv)
         processor.setParameterValue (motefield::parameter::tempo, 60.0f);
         processor.setStateInformation (state.getData(), static_cast<int> (state.getSize()));
         require (std::abs (value (motefield::parameter::tempo) - 133.0f) < .01f, "parameter state restore failed");
+        click(*editor,"wetSolo"); click(*editor,"levelMatch");
+        require(value("wetSolo")>.5f && value("levelMatch")>.5f,"monitor button attachment failed");
+        require(!find(*editor,"wetSolo")->getBounds().intersects(find(*editor,"levelMatch")->getBounds()),"monitor buttons overlap");
+        processor.setParameterValue("width",1.7f);
         auto oldState = processor.parameters.copyState();
         for (int i = oldState.getNumChildren() - 1; i >= 0; --i)
-            if (oldState.getChild (i).getProperty ("id").toString() == motefield::parameter::bypass)
+            if (juce::StringArray { motefield::parameter::bypass, "width", "wetSolo", "levelMatch" }.contains(oldState.getChild (i).getProperty ("id").toString()))
                 oldState.removeChild (i, nullptr);
         juce::MemoryBlock oldBytes;
         juce::AudioProcessor::copyXmlToBinary (*oldState.createXml(), oldBytes);
         processor.setStateInformation (oldBytes.getData(), static_cast<int> (oldBytes.getSize()));
         require (value (motefield::parameter::bypass) < .5f, "v0.1 state did not clear a newer bypass setting");
+        require(value("width")==1.f && value("wetSolo")==0.f && value("levelMatch")==0.f,"legacy session failed neutral monitor defaults");
         processor.setParameterValue (motefield::parameter::freeze, 0.0f);
         processor.setParameterValue (motefield::parameter::bypass, 0.0f);
         click (*editor, "record"); processSilence();

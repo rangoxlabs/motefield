@@ -1011,6 +1011,8 @@ struct Engine::Impl
         spawnCountdown = 0.0;
         sequenceStep = 0;
         feedbackL = feedbackR = 0.0f;
+        smoothedWidth = 1.f; smoothedSolo = 0.f; matchGain = smoothedMatch = 1.f;
+        matchEnabled = matchLearning = false; matchSamples = 0; matchInput = matchOutput = 0.;
         smoothedMix = 0.5f;
         grainNormalizer = 1.f;
         smoothedCutoff = 18000.0f;
@@ -1042,6 +1044,7 @@ struct Engine::Impl
         for (auto& channel : dry) channel.resize (static_cast<std::size_t> (samples));
         for (auto& channel : stage) channel.resize (static_cast<std::size_t> (samples));
         for (auto& channel : wet) channel.resize (static_cast<std::size_t> (samples));
+        for (auto& channel : soloCorrection) channel.resize (static_cast<std::size_t> (samples));
     }
 
     void rememberOnset() noexcept
@@ -1296,7 +1299,10 @@ struct Engine::Impl
         {
             const auto inputL = parameters.bypass && parameters.trails ? 0.f : stage[0][static_cast<std::size_t> (sample)];
             const auto inputR = parameters.bypass && parameters.trails ? 0.f : stage[1][static_cast<std::size_t> (sample)];
-            const auto side = parameters.sidechain ? std::abs (parameters.sidechain[sample]) : 0.f;
+            const auto sideL = parameters.sidechain ? parameters.sidechain[sample] : 0.f;
+            const auto sideR = parameters.sidechainRight ? parameters.sidechainRight[sample] : sideL;
+            // Energy fold-down retains right-only and opposite-polarity stereo keys.
+            const auto side = std::sqrt (.5f * (sideL * sideL + sideR * sideR));
             const auto previousMagnet = magnetEnvelope;
             magnetEnvelope += (side > magnetEnvelope ? attack : magnetRelease) * (side - magnetEnvelope);
             const auto magnetic = std::tanh (magnetEnvelope * 5.f) * parameters.magnetAmount;
@@ -1410,6 +1416,8 @@ struct Engine::Impl
             const auto wetGain = std::sin (clamp (smoothedMix, 0.0f, 1.0f) * pi * 0.5f);
             wet[0][static_cast<std::size_t> (sample)] = (inputL * dryGain + effectL * wetGain) * smoothedOutput;
             wet[1][static_cast<std::size_t> (sample)] = (inputR * dryGain + effectR * wetGain) * smoothedOutput;
+            soloCorrection[0][static_cast<std::size_t> (sample)] = effectL * smoothedOutput - wet[0][static_cast<std::size_t> (sample)];
+            soloCorrection[1][static_cast<std::size_t> (sample)] = effectR * smoothedOutput - wet[1][static_cast<std::size_t> (sample)];
             blockEffectPeak = std::max ({ blockEffectPeak, std::abs (effectL), std::abs (effectR) });
             countedActiveGrains = std::max (countedActiveGrains, active);
         }
@@ -1440,11 +1448,24 @@ struct Engine::Impl
                 auto chunkParameters = parameters;
                 chunkParameters.hostPpq += offset / (sampleRate * 60.0 / parameters.bpm);
                 if (parameters.sidechain) chunkParameters.sidechain += offset;
+                if (parameters.sidechainRight) chunkParameters.sidechainRight += offset;
                 process (chunkIn, chunkOut, actualChannels, std::min (maximumBlockSize, samples - offset), chunkParameters);
             }
             return;
         }
 
+        const std::array settings { parameters.width, parameters.wetSolo ? 1.f : 0.f, parameters.mix,
+            parameters.outputGain, static_cast<float>(parameters.mode), static_cast<float>(parameters.variation),
+            parameters.density, parameters.repeats, parameters.shape, parameters.cutoffHz, parameters.space,
+            parameters.resonance, parameters.modulationDepth, parameters.modulationRateHz,
+            static_cast<float>(parameters.division), static_cast<float>(parameters.reverbStyle),
+            parameters.fieldPitch, parameters.fieldStretch, parameters.reverse ? 1.f : 0.f, parameters.looperLevel };
+        if (parameters.levelMatch && (!matchEnabled || settings != matchSettings))
+        { matchLearning = true; matchSamples = 0; matchInput = matchOutput = 0.; }
+        if (!parameters.levelMatch) { matchLearning = false; matchGain = 1.f; }
+        matchEnabled = parameters.levelMatch; matchSettings = settings;
+        const float monitorSmoothing = 1.f - std::exp (-1.f / static_cast<float>(sampleRate * .02));
+        const float gainSmoothing = 1.f - std::exp (-1.f / static_cast<float>(sampleRate * .15));
         looper.beginBlock();
         auto loopParameters = parameters;
         if (parameters.bypass && parameters.trails)
@@ -1496,6 +1517,29 @@ struct Engine::Impl
         for (int sample = 0; sample < samples; ++sample)
         {
             const auto index = static_cast<std::size_t> (sample);
+            smoothedWidth += monitorSmoothing * (parameters.width - smoothedWidth);
+            smoothedSolo += monitorSmoothing * ((parameters.wetSolo ? 1.f : 0.f) - smoothedSolo);
+            auto monitorL = wet[0][index] + soloCorrection[0][index] * smoothedSolo;
+            auto monitorR = wet[1][index] + soloCorrection[1][index] * smoothedSolo;
+            if (actualChannels > 1)
+            {
+                const auto mid = (monitorL + monitorR) * .5f, side = (monitorL - monitorR) * .5f * smoothedWidth;
+                monitorL = mid + side; monitorR = mid - side;
+            }
+            else monitorR = monitorL;
+            if (matchLearning && !parameters.bypass)
+            {
+                matchInput += .5 * (dry[0][index] * dry[0][index] + dry[actualChannels-1][index] * dry[actualChannels-1][index]);
+                matchOutput += .5 * (monitorL * monitorL + monitorR * monitorR);
+                if (++matchSamples >= static_cast<std::uint64_t>(sampleRate * 3.))
+                {
+                    if (matchInput / matchSamples > 1.e-7 && matchOutput / matchSamples > 1.e-7)
+                    { matchGain = clamp (static_cast<float>(std::sqrt(matchInput / matchOutput)), .25f, 4.f); matchLearning = false; }
+                    matchSamples = 0; matchInput = matchOutput = 0.;
+                }
+            }
+            smoothedMatch += gainSmoothing * (matchGain - smoothedMatch);
+            wet[0][index] = monitorL * smoothedMatch; wet[1][index] = monitorR * smoothedMatch;
             smoothedBypass += 0.003f * ((parameters.bypass && ! parameters.trails ? 1.0f : 0.0f) - smoothedBypass);
             outputs[0][sample] = lerp (wet[0][index], dry[0][index], smoothedBypass);
             if (actualChannels > 1)
@@ -1567,6 +1611,7 @@ struct Engine::Impl
         frame.inputLevel = inputLevel.load (std::memory_order_relaxed);
         frame.effectLevel = effectLevel.load (std::memory_order_relaxed);
         frame.outputLevel = outputPeak;
+        frame.width = smoothedWidth; frame.matchGain = smoothedMatch; frame.matchLearning = matchLearning;
         for (std::size_t band = 0; band < visualBandPower.size(); ++band) frame.spectralEnergy[band] = std::sqrt (std::max (0.f, visualBandPower[band]));
         for (std::size_t channel = 0; channel < 2; ++channel)
             for (std::size_t point = 0; point < VisualFrame::outputPoints; ++point)
@@ -1636,7 +1681,7 @@ struct Engine::Impl
     std::array<double, 8> onsetAges {};
     std::array<std::vector<float>, 2> dry;
     std::array<std::vector<float>, 2> stage;
-    std::array<std::vector<float>, 2> wet;
+    std::array<std::vector<float>, 2> wet, soloCorrection;
     Random random, pitchRandom;
     int onsetCount = 0;
     int sequenceStep = 0, eventStep = 0;
@@ -1644,6 +1689,11 @@ struct Engine::Impl
     float feedbackL = 0.0f;
     float feedbackR = 0.0f;
     float grainNormalizer = 1.f;
+    float smoothedWidth = 1.f, smoothedSolo = 0.f, matchGain = 1.f, smoothedMatch = 1.f;
+    bool matchEnabled = false, matchLearning = false;
+    std::uint64_t matchSamples = 0;
+    double matchInput = 0., matchOutput = 0.;
+    std::array<float, 20> matchSettings {};
     float smoothedMix = 0.5f;
     float smoothedCutoff = 18000.0f;
     float smoothedOutput = 1.0f;

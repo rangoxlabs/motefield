@@ -41,7 +41,7 @@ void wav (const juce::AudioBuffer<float>& audio, const juce::File& file)
 }
 }
 int main(int argc,char** argv) {try {
- require(argc>=6,"usage: MoteFieldPromo output clip source-48k.wav bpm preset-indices [--audio-only|--audition]");
+ require(argc>=6,"usage: MoteFieldPromo output clip source-48k.wav bpm preset-indices [--audio-only|--audition|--wet-preview]");
  juce::ScopedJuceInitialiser_GUI gui;const juce::File output(argv[1]);require(output.createDirectory().wasOk(),"output folder");
  const auto kind=juce::String(argv[2]);const bool dark=!kind.startsWith("arp"),looping=kind=="looper",audioOnly=argc>6;
  demoBpm=juce::String(argv[4]).getDoubleValue();require(demoBpm>30. && demoBpm<300.,"invalid source tempo");
@@ -55,11 +55,13 @@ int main(int argc,char** argv) {try {
  for(const auto& token:juce::StringArray::fromTokens(argv[5],",",""))presets.push_back(token.getIntValue());
  require(!presets.empty(),"choose presets");
  const auto names=MoteFieldAudioProcessor::factoryPresetNames();
- if(argc>6 && juce::String(argv[6])=="--audition") {
+ const bool wetPreview=argc>6 && juce::String(argv[6])=="--wet-preview";
+ if(wetPreview || (argc>6 && juce::String(argv[6])=="--audition")) {
   auto metrics=output.getChildFile(kind+"-audition.csv").createOutputStream();metrics->setPosition(0);metrics->truncate();
   *metrics<<"index,name,mode,mix,peak,rms,change_rms,stereo_rms,max_step\n";
   for(int id=0;id<names.size();++id) {
-   Timeline clock;MoteFieldAudioProcessor test;test.setPlayHead(&clock);test.applyFactoryPreset(id);test.prepareToPlay(sampleRate,400);
+   if(wetPreview && std::find(presets.begin(),presets.end(),id)==presets.end())continue;
+   Timeline clock;MoteFieldAudioProcessor test;test.setPlayHead(&clock);test.applyFactoryPreset(id);if(wetPreview)test.setParameterValue("mix",1.f);test.prepareToPlay(sampleRate,400);
    const int length=sourceSamples+sampleRate*2;juce::AudioBuffer<float> result(2,length),part(2,400);juce::MidiBuffer midi;
    double power=0,delta=0,stereo=0;float peak=0,step=0,prev[2]{};
    for(int offset=0;offset<length;) {

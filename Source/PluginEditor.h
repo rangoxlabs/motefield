@@ -71,7 +71,7 @@ private:
     };
     std::array<SurfaceBody, 5> surfaceBodies {};
     float staleSeconds = 0.f, lowDrive = 0.f, midDrive = 0.f, highDrive = 0.f;
-    float centreX = 240.f, centreY = 72.f;
+    float centreX = 240.f, centreY = 72.f, motionPhase = 0.f, transientDrive = 0.f, lastDrive = 0.f;
     void renderLiquid();
     static constexpr int liquidWidth = 480, liquidHeight = 240;
     std::array<LiquidVoice, 64> liquidVoices {};
@@ -141,7 +141,8 @@ private:
     std::vector<std::unique_ptr<ParameterKnob>> knobs;
     std::vector<std::unique_ptr<SliderAttachment>> sliderAttachments;
     std::unique_ptr<SliderAttachment> timeAttachment;
-    juce::TextButton reverseButton, syncButton, tapButton, holdButton, bypassButton;
+    juce::TextButton reverseButton, syncButton, tapButton, holdButton, bypassButton, wetSoloButton, levelMatchButton;
+    juce::Label matchStatus;
     juce::TextButton recordButton, playButton, dubButton, stopButton, undoButton, eraseButton;
     juce::TextButton preButton, postButton, loopReverseButton, detailsButton, motionButton;
     juce::TextButton previousPreset, nextPreset, savePresetButton, randomPresetButton, performanceButton;

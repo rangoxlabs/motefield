@@ -7,7 +7,7 @@
 MoteFieldAudioProcessor::MoteFieldAudioProcessor()
     : AudioProcessor (BusesProperties()
                           .withInput ("Input", juce::AudioChannelSet::stereo(), true)
-                          .withInput ("Magnet", juce::AudioChannelSet::mono(), false)
+                          .withInput ("Magnet", juce::AudioChannelSet::stereo(), false)
                           .withOutput ("Output", juce::AudioChannelSet::stereo(), true)),
       parameters (*this, nullptr, "MoteFieldState", createParameterLayout())
 {
@@ -50,7 +50,13 @@ bool MoteFieldAudioProcessor::isBusesLayoutSupported (const BusesLayout& layouts
     const auto input = layouts.getMainInputChannelSet();
     const auto output = layouts.getMainOutputChannelSet();
     if (input != output) return false;
-    if (layouts.inputBuses.size() > 1 && ! layouts.inputBuses[1].isDisabled() && layouts.inputBuses[1] != juce::AudioChannelSet::mono()) return false;
+    // AU hosts may negotiate the auxiliary input as stereo even when no external
+    // source is selected. Accept its layout independently of the main bus.
+    if (layouts.inputBuses.size() > 1)
+    {
+        const auto& side = layouts.inputBuses[1];
+        if (!side.isDisabled() && side != juce::AudioChannelSet::mono() && side != juce::AudioChannelSet::stereo()) return false;
+    }
     return input == juce::AudioChannelSet::mono() || input == juce::AudioChannelSet::stereo();
 }
 
@@ -121,6 +127,9 @@ void MoteFieldAudioProcessor::processAudio (juce::AudioBuffer<float>& buffer, in
     values.space = load (motefield::parameter::space);
     values.reverbStyle = juce::jlimit (0, 3, static_cast<int> (std::lround (load (motefield::parameter::reverbStyle))));
     values.mix = load (motefield::parameter::mix);
+    values.width = load ("width");
+    values.wetSolo = load ("wetSolo") > .5f;
+    values.levelMatch = load ("levelMatch") > .5f;
     values.outputGain = decibelsToGain (load (motefield::parameter::output));
     values.looperLevel = load (motefield::parameter::looperLevel);
     values.looperReverse = load (motefield::parameter::looperReverse) > 0.5f;
@@ -148,7 +157,11 @@ void MoteFieldAudioProcessor::processAudio (juce::AudioBuffer<float>& buffer, in
     values.rhythmMutation = static_cast<int> (load ("rhythmMutation")); values.pitchMutation = static_cast<int> (load ("pitchMutation"));
     values.scale = static_cast<int> (load ("scale")); values.root = static_cast<int> (load ("scaleRoot")); values.sourceNote = static_cast<int> (load ("sourceNote"));
     if (getBusCount (true) > 1 && getBus (true, 1)->isEnabled())
-    { auto side = getBusBuffer (buffer, true, 1); if (side.getNumChannels() > 0) values.sidechain = side.getReadPointer (0) + offset; }
+    {
+        auto side = getBusBuffer (buffer, true, 1);
+        if (side.getNumChannels() > 0) values.sidechain = side.getReadPointer (0) + offset;
+        if (side.getNumChannels() > 1) values.sidechainRight = side.getReadPointer (1) + offset;
+    }
     bool hostTempoFound = false;
     if (load (motefield::parameter::sync) > 0.5f)
     {
@@ -372,6 +385,12 @@ juce::AudioProcessorValueTreeState::ParameterLayout MoteFieldAudioProcessor::cre
             ParameterID { motefield::parameter::looperTriggers[i], 3 }, names[i], false));
 
     addPerformanceParameters (layout);
+    // Append parameters; retain the AU ordering/version hints used by old sessions.
+    layout.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "width", 5 }, "Stereo Width",
+        juce::NormalisableRange<float> { 0.f, 2.f, .001f }, 1.f,
+        juce::AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int) { return juce::String (juce::roundToInt (v * 100.f)) + "%"; })));
+    layout.add (std::make_unique<juce::AudioParameterBool> (ParameterID { "wetSolo", 5 }, "Wet Solo", false));
+    layout.add (std::make_unique<juce::AudioParameterBool> (ParameterID { "levelMatch", 5 }, "Level Match", false));
     return layout;
 }
 
@@ -477,6 +496,7 @@ void MoteFieldAudioProcessor::applyFactoryPreset (int index)
     setParameterValue (division, static_cast<float> (preset.pulse));
     setParameterValue (reverbStyle, static_cast<float> (preset.room));
     setParameterValue (reverse, 0.0f);
+    setParameterValue ("width", 1.f);
     rememberPreset (factoryPresetNames()[index], "factory");
 }
 

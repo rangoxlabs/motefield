@@ -9,6 +9,7 @@
 #include <string>
 #include <vector>
 #include <thread>
+#include <tuple>
 
 namespace { thread_local bool watchingAudioAllocations = false; thread_local int audioAllocations = 0; }
 void* operator new (std::size_t size)
@@ -531,10 +532,59 @@ void testMaterialAndPatterns()
     std::cout << "Material DSP: audible gestures, viscosity/cohesion/tension, sidechain compression, reproducible patterns, independent mutations and scale constraints passed.\n";
 }
 
+void testOutputMonitoring()
+{
+    constexpr int block = 256;
+    const auto render = [] (motefield::EngineParameters p, int channels = 2, bool silence = false)
+    {
+        motefield::Engine engine; engine.prepare(sampleRate, block, channels);
+        std::array<float, block> l {}, r {}, a {}, b {};
+        motefield::VisualFrame frame;
+        for (int offset = 0; offset < 240128; offset += block)
+        {
+            for (int i=0;i<block;++i) { l[i]=silence?0.f:.1f*std::sin(twoPi*(offset+i)*220.f/48000.f); r[i]=silence?0.f:.07f*std::cos(twoPi*(offset+i)*330.f/48000.f); }
+            const float* in[] {l.data(), r.data()}; float* out[] {a.data(), b.data()};
+            engine.process(in,out,channels,block,p); engine.readVisualFrame(frame);
+            for (float x:a) require(std::isfinite(x),"monitor produced non-finite audio");
+        }
+        return std::tuple {l,r,a,b,frame};
+    };
+    motefield::EngineParameters p; p.mix=0.f;
+    for (float width : {0.f,1.f,2.f})
+    {
+        p.width=width; auto [l,r,a,b,f]=render(p);
+        for(int i=0;i<block;++i)
+        { const auto mid=(l[i]+r[i])*.5f,side=(l[i]-r[i])*.5f*width;
+          require(std::abs(a[i]-mid-side)<.00005f && std::abs(b[i]-mid+side)<.00005f,"Width failed mid/side identity"); }
+    }
+    p.width=2.f; auto [ml,mr,ma,mb,mf]=render(p,1);
+    for(int i=0;i<block;++i)require(std::abs(ml[i]-ma[i])<.00005f,"Width changed mono audio");
+    p.width=1.f; p.wetSolo=true; auto solo=render(p);
+    p.wetSolo=false;p.mix=1.f; auto wet=render(p);
+    for(int i=0;i<block;++i) require(std::abs(std::get<2>(solo)[i]-std::get<2>(wet)[i])<.00005f,"Wet Solo differs from fully wet signal");
+    p.mix=0.f;p.outputGain=.5f;p.levelMatch=true;
+    auto matched=render(p); const auto matchedFrame=std::get<4>(matched);
+    require(!matchedFrame.matchLearning && std::abs(matchedFrame.matchGain-2.f)<.02f,"Level Match failed to compensate -6 dB");
+    for(int i=0;i<block;++i) require(std::abs(std::get<0>(matched)[i]-std::get<2>(matched)[i])<.001f,"Level Match did not restore reference level");
+    const auto silent=std::get<4>(render(p,2,true));
+    require(silent.matchLearning && silent.matchGain==1.f,"Level Match boosted silence");
+    p.width=0.f;p.wetSolo=true;p.bypass=true; auto bypassed=render(p);
+    for(int i=0;i<block;++i) require(std::abs(std::get<0>(bypassed)[i]-std::get<2>(bypassed)[i])<.00005f,"monitor controls altered bypass");
+    // Monitoring must not print into a POST recording.
+    motefield::Engine first,second; first.prepare(sampleRate,block,2);second.prepare(sampleRate,block,2);
+    motefield::EngineParameters normal;normal.mix=.35f;auto monitored=normal;monitored.wetSolo=true;monitored.width=0;monitored.levelMatch=true;
+    first.requestLooperCommand(motefield::LooperCommand::record); second.requestLooperCommand(motefield::LooperCommand::record);
+    std::array<float,block> in {},a {},b {};in.fill(.05f);const float* inputs[]{in.data(),in.data()};float* outputs[]{a.data(),b.data()};
+    for(int i=0;i<100;++i){first.process(inputs,outputs,2,block,normal);second.process(inputs,outputs,2,block,monitored);}
+    require(first.snapshotLoop().audio==second.snapshotLoop().audio,"monitoring changed POST recording");
+    std::cout << "Output monitoring: width, mono, fully wet isolation, level compensation, silence, bypass and unchanged POST recording passed.\n";
+}
+
 } // namespace
 
 int main (int argc, char**)
 {
+    testOutputMonitoring();
     testPerformanceFeatures();
     testMaterialAndPatterns();
     if (argc > 1) return 0;

@@ -363,7 +363,7 @@ void FieldDisplay::update (const motefield::VisualFrame& next)
     outputDrive += (target - outputDrive) * (1.f - std::exp (-dt * (target > outputDrive ? 28.f : 10.f)));
     const auto followBand = [dt, signalCurrent] (float& current, float measured, float gain)
     {
-        const auto destination = signalCurrent ? std::tanh (measured * gain) : 0.f;
+        const auto destination = signalCurrent && measured > .00002f ? std::sqrt (std::tanh (measured * gain)) : 0.f;
         current += (destination - current) * (1.f - std::exp (-dt * 24.f));
         if (current < .00005f) current = 0.f;
     };
@@ -371,6 +371,11 @@ void FieldDisplay::update (const motefield::VisualFrame& next)
     followBand (midDrive, next.spectralEnergy[1], 7.f);
     followBand (highDrive, next.spectralEnergy[2], 10.f);
     if (outputDrive < .0001f) outputDrive = 0.f;
+    const auto energy = (lowDrive + midDrive + highDrive) / 3.f;
+    transientDrive += (juce::jmax(0.f, energy - lastDrive) * 6.f - transientDrive) * (1.f - std::exp(-dt * 18.f));
+    lastDrive = energy;
+    if (advanced && !reducedMotion) motionPhase += dt * energy * 4.f;
+    if (energy == 0.f) { motionPhase = 0.f; transientDrive = 0.f; }
     struct Cluster { float energy = 0.f, x = 0.f, y = 0.f, bend = 0.f; };
     std::array<Cluster, 5> clusters {};
     float weight = 0.f, meanX = 0.f, meanY = 0.f;
@@ -382,7 +387,7 @@ void FieldDisplay::update (const motefield::VisualFrame& next)
         cluster.y += voice.y * voice.energy;cluster.bend += voice.bend * voice.energy;
         weight += voice.energy;meanX += voice.x * voice.energy;meanY += voice.y * voice.energy;
     }
-    const auto targetX = 240.f + (weight > .001f && ! reducedMotion ? (meanX / weight - .5f) * 45.f : 0.f) + (reducedMotion ? 0.f : (next.fieldPosition * 2.f - next.fieldSplit) * 55.f);
+    const auto targetX = 240.f + (reducedMotion ? 0.f : std::sin(motionPhase) * (energy * 15.f + transientDrive * 12.f)) + (weight > .001f && ! reducedMotion ? (meanX / weight - .5f) * 45.f : 0.f) + (reducedMotion ? 0.f : (next.fieldPosition * 2.f - next.fieldSplit) * 55.f);
     const auto targetY = juce::jlimit (65.f, 79.f, 72.f + (weight > .001f && ! reducedMotion ? (meanY / weight - .5f) * 22.f : 0.f) - (reducedMotion ? 0.f : next.fieldPitch * .6f));
     centreX += (targetX - centreX) * (1.f - std::exp (-dt * 14.f));
     centreY += (targetY - centreY) * (1.f - std::exp (-dt * 14.f));
@@ -402,9 +407,9 @@ void FieldDisplay::update (const motefield::VisualFrame& next)
         auto& body = surfaceBodies[i];const auto& cluster = clusters[i];
         const auto amount = 1.f - std::exp (-cluster.energy * 1.6f);
         const auto alive = cluster.energy > .0001f;
-        const auto tx = alive ? cluster.x / cluster.energy * liquidWidth : centreX;
+        const auto tx = alive ? cluster.x / cluster.energy * liquidWidth + (reducedMotion ? 0.f : std::sin(motionPhase + static_cast<float>(i)*1.7f) * energy * 24.f) : centreX;
         const auto ty = alive ? cluster.y / cluster.energy * 144.f : centreY;
-        const auto spread = (.35f + .65f * amount) * (1.5f - next.cohesion) + next.fieldSplit * .35f;
+        const auto spread = ((.45f + .80f * amount) * (1.5f - next.cohesion) + next.fieldSplit * .35f) * next.width;
         const auto x = reducedMotion ? 95.f + i * 72.f : centreX + (tx - centreX) * spread;
         const auto y = reducedMotion ? 72.f : centreY + (ty - centreY) * spread;
         spring (body.x, body.vx, juce::jlimit (104.f, liquidWidth - 104.f, x), 30.f - next.viscosity * 20.f);
@@ -438,9 +443,9 @@ void FieldDisplay::renderLiquid()
         // Retain the engine's original 480 x 144 motion space, while shading
         // round volumes in the actual display's aspect ratio.
         cx=240.f+(cx-240.f)*1.12f; cy=120.f+(cy-72.f)*1.8f;
-        radius=juce::jmin(radius,(liquidHeight*.5f-14.f)*ay);
-        cx=juce::jlimit(radius/ax+14.f,liquidWidth-radius/ax-14.f,cx);
-        cy=juce::jlimit(radius/ay+14.f,liquidHeight-radius/ay-14.f,cy);
+        radius=juce::jmin(radius,(liquidHeight*.5f-24.f)*ay);
+        cx=juce::jlimit(radius/ax+24.f,liquidWidth-radius/ax-24.f,cx);
+        cy=juce::jlimit(radius/ay+24.f,liquidHeight-radius/ay-24.f,cy);
         const auto reach = std::sqrt (radius * radius + blend * 8.f);
         const auto left = juce::jmax (0, static_cast<int> (cx - reach / ax));
         const auto right = juce::jmin (liquidWidth - 1, static_cast<int> (cx + reach / ax) + 1);
@@ -471,8 +476,8 @@ void FieldDisplay::renderLiquid()
     for(const auto& body:surfaceBodies) activeVolume+=body.radius;
     // Give active fragments room to reshape the core instead of hiding them
     // inside an oversized permanent sphere. The mass reunites when they decay.
-    const auto radius = 58.f - juce::jmin(20.f,activeVolume*.18f) + lowDrive * 18.f + midDrive * 8.f;
-    deposit (centreX, centreY, radius, reducedMotion ? 1.f : 1.f + lowDrive * .24f - midDrive * .22f);
+    const auto radius = 54.f - juce::jmin(23.f,activeVolume*.22f) + lowDrive * 14.f + midDrive * 6.f + transientDrive * 6.f;
+    deposit (centreX, centreY, radius, reducedMotion ? 1.f : juce::jlimit(.76f,1.38f,1.f + lowDrive * .30f - midDrive * .26f + std::sin(motionPhase)*outputDrive*.12f + (frame.width-1.f)*.15f*outputDrive));
     const auto tension = reducedMotion ? 0.f : (midDrive * .65f + highDrive * .85f) * (.25f + frame.tension * 1.5f) + frame.magnet * .5f;
     if (tension > .0001f)
         for (int pole = 0; pole < 5; ++pole)
@@ -570,7 +575,7 @@ void FieldDisplay::paint (juce::Graphics& g)
     // Inset the entire material, including split satellites, to leave travel room.
     g.drawImage (liquidImage,stage.reduced(stage.getWidth()*.025f,0));
 
-    const auto contour = view.withTrimmedLeft (view.getWidth() * .75f).withTrimmedBottom(43.f*s);
+    const auto contour = view.withTrimmedLeft (view.getWidth() * .75f).withTrimmedBottom(78.f*s);
     g.setColour (line.withAlpha (.7f));
 
     if (frame.mode == motefield::Mode::grid)
@@ -679,6 +684,7 @@ MoteFieldAudioProcessorEditor::MoteFieldAudioProcessorEditor (MoteFieldAudioProc
     addKnob ("DRIFT RATE", modRate, "Drift Rate: pitch modulation speed.");
     addKnob ("RESONANCE", resonance, "Resonance: emphasizes frequencies around the filter cutoff.");
     addKnob ("OUTPUT", output, "Output: trims the effect output in decibels.");
+    addKnob ("WIDTH", "width", "Stereo Width: 0% mono, 100% original width, 200% wider. Also spreads the reactor.");
     for (std::size_t i = 0; i < modeButtons.size(); ++i)
     {
         auto& button = modeButtons[i];
@@ -722,6 +728,12 @@ MoteFieldAudioProcessorEditor::MoteFieldAudioProcessorEditor (MoteFieldAudioProc
     holdButton.onClick = [this] { if (value ("holdStyle") < .5f) processor.setParameterValue ("freeze", value ("freeze") > .5f ? 0.f : 1.f); };
     holdButton.onStateChange = [this] { if (value ("holdStyle") > .5f) { const bool down = holdButton.isDown(); if (down != momentaryHoldDown) { momentaryHoldDown = down; processor.setParameterValue ("freeze", down ? 1.f : 0.f); } } };
     attachButton (bypass, bypassButton);
+    setupButton (wetSoloButton, "WET SOLO", "Hear the effect without the live dry blend. Keeps your Mix setting and recorded loop.", true);
+    setupButton (levelMatchButton, "LEVEL MATCH", "Measure three seconds of input and output, then hold level compensation. Relearns after sound changes; waits for signal during silence.", true);
+    attachButton ("wetSolo", wetSoloButton); attachButton ("levelMatch", levelMatchButton);
+    addAndMakeVisible (matchStatus);
+    matchStatus.setJustificationType (juce::Justification::centred);
+    matchStatus.setColour (juce::Label::textColourId, juce::Colour (0xffc5cebd));
     setupButton (recordButton, "REC", "Start a new phrase, up to 60 seconds.", false, 3);
     setupButton (playButton, "PLAY", "Close a recording, finish overdubbing, or resume a stopped phrase.", false, 3);
     setupButton (dubButton, "DUB", "Add another layer. Click again to finish the layer.", false, 3);
@@ -1008,6 +1020,8 @@ void MoteFieldAudioProcessorEditor::refreshDisplay()
     holdButton.setToggleState (frame.held, juce::dontSendNotification);
     frame.reverse = value (reverse) > .5f;
     frame.bypass = value (bypass) > .5f;
+    frame.width = value ("width");
+    matchStatus.setText (value ("levelMatch") < .5f ? "OUTPUT MONITOR" : frame.matchLearning ? "LEVEL MATCH / LEARNING" : "LEVEL MATCH / " + juce::String (juce::Decibels::gainToDecibels(frame.matchGain), 1) + " dB", juce::dontSendNotification);
     fieldDisplay.setSampleRate (processor.getSampleRate());
     fieldDisplay.setShape (value (shape));
     fieldDisplay.update (frame);
@@ -1064,7 +1078,8 @@ void MoteFieldAudioProcessorEditor::resized()
     if(!hardwarePanel.isValid()||hardwarePanel.getHeight()!=height)hardwarePanel=makeHardwarePanel(height,lookAndFeel.colours);
     for(auto& b:modeButtons)b.getProperties().set("glassDark",true);
     for(int i=0;i<4;++i)place(*knobs[i],443+i*201,79,116,133);
-    for(int i=4;i<8;++i)place(*knobs[i],310+(i-4)*199,574,116,127);
+    for(int i=4;i<7;++i)place(*knobs[i],281+(i-4)*154,574,116,127);
+    place(*knobs[12],743,574,116,127); place(*knobs[7],897,574,116,127);
     if(performancePanel)performancePanel->setBounds(getLocalBounds().reduced(14));
     if(settingsPanel)settingsPanel->setBounds(getLocalBounds());
     place(modeSelector,159,276,186,186);
@@ -1072,7 +1087,10 @@ void MoteFieldAudioProcessorEditor::resized()
     {const auto angle=(-120.f+i*30.f)*pi/180.f;place(modeButtons[i],252+std::sin(angle)*116-27,369-std::cos(angle)*116-13,54,26);}
     for(int i=0;i<4;++i)place(variationButtons[i],126+i*65,502,60,44);
     place(fieldDisplay,431,221,1090,321);
-    place(reverseButton,1275,496,168,45);reverseButton.getProperties().set("darkControl",true);
+    place(matchStatus,1236,425,240,20); matchStatus.setFont(font(11*s));
+    place(wetSoloButton,1236,450,114,40); place(levelMatchButton,1362,450,114,40);
+    for(auto* b:{&wetSoloButton,&levelMatchButton}) { b->getProperties().set("darkControl",true); }
+    place(reverseButton,1294,510,145,35);reverseButton.getProperties().set("darkControl",true);
     place(tapButton,1084,588,134,100);place(holdButton,1226,588,134,100);place(bypassButton,1366,588,134,100);
     place(looperTape,271,728,1210,121);
     place(recordButton,484,871,88,60);place(playButton,578,871,88,60);place(dubButton,674,871,88,60);
@@ -1085,7 +1103,7 @@ void MoteFieldAudioProcessorEditor::resized()
     place(syncButton,78,878,92,45);place(timeValueLabel,175,878,65,45);timeValueLabel.setFont(font(15*s,true));
     place(tempoLabel,245,878,119,45);tempoLabel.setFont(font(13*s));place(performanceButton,363,878,89,45);
     place(randomPresetButton,806,34,100,48);
-    place(presetBox,978,34,288,48);place(previousPreset,918,34,52,48);place(savePresetButton,1277,34,74,48);place(nextPreset,1361,34,46,48);
+    place(presetBox,978,34,288,48);place(previousPreset,918,34,52,48);place(nextPreset,1277,34,46,48);place(savePresetButton,1333,34,74,48);
     for(int i=8;i<12;++i){knobs[i]->setVisible(detailsOpen);place(*knobs[i],60+(i-8)*210,1000,164,178);}
     for(auto* c:std::array<juce::Component*,4>{&roomBox,&speedBox,&divisionBox,&motionButton})c->setVisible(detailsOpen);
     place(roomBox,962,1020,234,42);place(speedBox,1240,1020,290,42);place(divisionBox,962,1112,234,42);place(motionButton,1240,1112,290,42);

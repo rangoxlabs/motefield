@@ -71,6 +71,8 @@ struct EngineParameters
     int reverbStyle = 1;
     float mix = 0.5f;
     float outputGain = 1.0f;
+    float width = 1.0f;
+    bool wetSolo = false, levelMatch = false;
     float looperLevel = 0.75f;
     float looperSpeed = 1.0f;
     bool looperReverse = false;
@@ -87,6 +89,7 @@ struct EngineParameters
     float magnetAmount = 0.0f, magnetAttack = 0.01f, magnetRelease = 0.25f;
     int magnetMode = 0;
     const float* sidechain = nullptr;
+    const float* sidechainRight = nullptr;
     int seed = 1, rhythmMutation = 0, pitchMutation = 0, scale = 0, root = 0, sourceNote = 0;
     bool patternLock = false;
     int patternSteps = 16;
@@ -117,6 +120,8 @@ struct VisualFrame
     int variation = 0, voiceCount = 0;
     double bpm = 120.0;
     float inputLevel = 0.0f, effectLevel = 0.0f, outputLevel = 0.0f;
+    float width = 1.f, matchGain = 1.f;
+    bool matchLearning = false;
     // Post-output low/mid/high band RMS envelopes; visual analysis only.
     std::array<float, 3> spectralEnergy {};
     float viscosity = .25f, cohesion = .5f, tension = .5f, magnet = 0.f;
