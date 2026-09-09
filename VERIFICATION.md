@@ -1,3 +1,11 @@
+# 0.3.5 verification
+
+Width now runs before POST looper capture. Its setting is printed into new POST recordings, so changing Width afterward cannot reshape the stored playback; the WAV export contains that same print. Existing loops remain unchanged. PRE capture remains unprocessed and plays through the live effects as designed.
+
+Above 100%, the control eases into a maximum side gain of 1.10 instead of 2.0. Narrowing and 100% unity are retained. No delays or phase rotation are introduced; the mono sum is unchanged. This reduces added phase sensitivity, but cannot guarantee positive correlation for source material or effects already near or below zero correlation.
+
+Local DSP and click suites passed (62.16 s / 8.13 s), including the 10% side-gain ceiling, unchanged mono sum, a positively correlated wide test signal, POST width printing, identical existing POST playback at 0/100/200%, unchanged export data and preserved PRE routing. Platform package results follow below. Preset initialization is not implemented in this release.
+
 # 0.3.4 verification
 
 Current release candidate adds stereo Width, Wet Solo, Level Match and stronger audio-driven reactor deformation. The optional Magnet sidechain now accepts disabled, mono or stereo layouts independently of the matching mono/stereo main buses.

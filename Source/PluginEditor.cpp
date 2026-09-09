@@ -684,7 +684,7 @@ MoteFieldAudioProcessorEditor::MoteFieldAudioProcessorEditor (MoteFieldAudioProc
     addKnob ("DRIFT RATE", modRate, "Drift Rate: pitch modulation speed.");
     addKnob ("RESONANCE", resonance, "Resonance: emphasizes frequencies around the filter cutoff.");
     addKnob ("OUTPUT", output, "Output: trims the effect output in decibels.");
-    addKnob ("WIDTH", "width", "Stereo Width: 0% mono, 100% original width, 200% wider. Also spreads the reactor.");
+    addKnob ("WIDTH", "width", "Stereo Width: 0% mono, 100% original; above 100% adds gentle widening, capped at +10% side gain. Printed into POST recordings; playback keeps its recorded width.");
     for (std::size_t i = 0; i < modeButtons.size(); ++i)
     {
         auto& button = modeButtons[i];

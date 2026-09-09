@@ -6,7 +6,7 @@ The clear enclosure, sculpted knob rails, and Acid lighting surround a pearl fer
 
 ![MoteField interface](docs/images/motefield.png)
 
-**Current version: 0.3.4 development.** Available as universal macOS AU/VST3 and Windows x64 VST3 test builds. See [VERIFICATION.md](VERIFICATION.md) for checks and remaining host-specific validation.
+**Current version: 0.3.5 development.** Available as universal macOS AU/VST3 and Windows x64 VST3 test builds. See [VERIFICATION.md](VERIFICATION.md) for checks and remaining host-specific validation.
 
 ## Included effects
 
@@ -39,7 +39,7 @@ Select an effect by turning the mode dial or clicking its name. The pointer alig
 | **Infinite reverb** | The longest-feedback and widest reverb character. Despite the name, its tail decays; use Hold to sustain captured material. |
 | **FX Reverse** | Reverses effect playback. It is independent of the phrase looper's reverse control. |
 | **Hold** | Stops replacing the recent capture while playback continues. In Grid and Smear, it captures and repeats the recent delay phrase. |
-| **Width** | Smooth stereo mid/side width: 0% mono, 100% original, 200% expanded sides. Also changes the reactor’s horizontal spread. |
+| **Width** | 0% mono, 100% original. Above 100%, a gentle curve caps added side gain at 10%, without delays or changing the mono sum. Width is printed into POST recordings; subsequent knob changes affect the live path, not the stored loop. PRE recordings remain upstream of the effects. Also changes the reactor’s horizontal spread. |
 | **Wet Solo** | Auditions the fully wet live effect without changing Mix or writing the monitoring change into the looper. Existing POST recordings retain their recorded blend. |
 | **Level Match** | Measures three seconds of input/output RMS, then holds compensation (up to ±12 dB). Relearns after main sound-control changes and waits for signal during silence. |
 | **Mix / Output** | Blends dry and processed audio, then trims the effect output level. |

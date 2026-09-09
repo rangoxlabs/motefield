@@ -554,7 +554,7 @@ void testOutputMonitoring()
     {
         p.width=width; auto [l,r,a,b,f]=render(p);
         for(int i=0;i<block;++i)
-        { const auto mid=(l[i]+r[i])*.5f,side=(l[i]-r[i])*.5f*width;
+        { const auto mid=(l[i]+r[i])*.5f,side=(l[i]-r[i])*.5f*(width == 2.f ? 1.1f : width);
           require(std::abs(a[i]-mid-side)<.00005f && std::abs(b[i]-mid+side)<.00005f,"Width failed mid/side identity"); }
     }
     p.width=2.f; auto [ml,mr,ma,mb,mf]=render(p,1);
@@ -572,7 +572,7 @@ void testOutputMonitoring()
     for(int i=0;i<block;++i) require(std::abs(std::get<0>(bypassed)[i]-std::get<2>(bypassed)[i])<.00005f,"monitor controls altered bypass");
     // Monitoring must not print into a POST recording.
     motefield::Engine first,second; first.prepare(sampleRate,block,2);second.prepare(sampleRate,block,2);
-    motefield::EngineParameters normal;normal.mix=.35f;auto monitored=normal;monitored.wetSolo=true;monitored.width=0;monitored.levelMatch=true;
+    motefield::EngineParameters normal;normal.mix=.35f;auto monitored=normal;monitored.wetSolo=true;monitored.levelMatch=true;
     first.requestLooperCommand(motefield::LooperCommand::record); second.requestLooperCommand(motefield::LooperCommand::record);
     std::array<float,block> in {},a {},b {};in.fill(.05f);const float* inputs[]{in.data(),in.data()};float* outputs[]{a.data(),b.data()};
     for(int i=0;i<100;++i){first.process(inputs,outputs,2,block,normal);second.process(inputs,outputs,2,block,monitored);}
@@ -580,10 +580,65 @@ void testOutputMonitoring()
     std::cout << "Output monitoring: width, mono, fully wet isolation, level compensation, silence, bypass and unchanged POST recording passed.\n";
 }
 
+void testWidthPrintAndMonoCompatibility()
+{
+    constexpr int block=256, count=24000;
+    // A wide but positively correlated source must not receive the old 2x side boost.
+    motefield::Engine engine; engine.prepare(sampleRate,block,2);
+    motefield::EngineParameters p;p.mix=0.f;p.width=2.f;
+    std::array<float,block> l {},r {},a {},b {};
+    const float* inputs[]{l.data(),r.data()};float* outputs[]{a.data(),b.data()};
+    double sumLR=0, sumLL=0, sumRR=0, sideIn=0,sideOut=0;float monoError=0;
+    for(int offset=0;offset<96000;offset+=block)
+    {
+        const auto n=std::min(block,96000-offset);
+        for(int i=0;i<n;++i){const auto mid=.1f*std::sin(twoPi*(offset+i)*220.f/48000.f),side=.09f*std::cos(twoPi*(offset+i)*330.f/48000.f);l[i]=mid+side;r[i]=mid-side;}
+        engine.process(inputs,outputs,2,n,p);
+        if(offset>=48000)for(int i=0;i<n;++i){sumLR+=a[i]*b[i];sumLL+=a[i]*a[i];sumRR+=b[i]*b[i];sideIn+=std::pow(l[i]-r[i],2);sideOut+=std::pow(a[i]-b[i],2);monoError=std::max(monoError,std::abs((a[i]+b[i])-(l[i]+r[i])));}
+    }
+    const auto correlation=sumLR/std::sqrt(sumLL*sumRR);
+    require(correlation>0.f,"maximum width flipped the wide test signal negative");
+    require(std::sqrt(sideOut/sideIn)<=1.1001,"side gain exceeded conservative ceiling");
+    require(monoError<.00001f,"widening altered mono sum");
+    const auto record=[&](bool pre,float width)
+    {
+        motefield::Engine recorder;recorder.prepare(sampleRate,block,2);
+        auto settings=p;settings.width=width;settings.looperBeforeEffect=pre;
+        recorder.requestLooperCommand(motefield::LooperCommand::record);
+        for(int offset=0;offset<count;offset+=block)
+        {
+            const auto n=std::min(block,count-offset);
+            for(int i=0;i<n;++i){l[i]=.1f*std::sin(twoPi*(offset+i)*220.f/48000.f);r[i]=.08f*std::cos(twoPi*(offset+i)*330.f/48000.f);}
+            recorder.process(inputs,outputs,2,n,settings);
+        }
+        return recorder.snapshotLoop();
+    };
+    auto printed=record(false,0.f),original=record(true,0.f);
+    require(printed.audio[0].size()==count && original.audio[0].size()==count,"width changed recorded length");
+    double rawSides=0;
+    for(int i=count/2;i<count;++i){require(std::abs(printed.audio[0][i]-printed.audio[1][i])<.00001f,"POST recording did not print mono width");rawSides+=std::abs(original.audio[0][i]-original.audio[1][i]);}
+    require(rawSides>100.,"PRE recording incorrectly printed width");
+    const auto playback=[&](bool pre,float width)
+    {
+        motefield::Engine player;player.prepare(sampleRate,block,2);
+        auto saved=original;saved.playing=true;require(player.restoreLoop(saved),"could not restore test loop");
+        auto settings=p;settings.width=width;settings.looperBeforeEffect=pre;settings.looperLevel=1.f;
+        l.fill(0);r.fill(0);std::vector<float> result;
+        for(int offset=0;offset<48000;offset+=block){player.process(inputs,outputs,2,block,settings);if(offset>24000)for(int i=0;i<block;++i){result.push_back(a[i]);result.push_back(b[i]);}}
+        require(player.snapshotLoop().audio==saved.audio,"playback width modified export data");
+        return result;
+    };
+    const auto neutral=playback(false,1.f);
+    require(neutral==playback(false,0.f) && neutral==playback(false,2.f),"Width changed an existing POST loop during playback");
+    require(playback(true,0.f)!=playback(true,1.f),"PRE loop no longer feeds live width processing");
+    std::cout<<"Width print: bounded side gain, positive test correlation "<<correlation<<", mono sum, POST capture/playback/export consistency and PRE routing passed.\n";
+}
+
 } // namespace
 
 int main (int argc, char**)
 {
+    testWidthPrintAndMonoCompatibility();
     testOutputMonitoring();
     testPerformanceFeatures();
     testMaterialAndPatterns();

@@ -1011,6 +1011,7 @@ struct Engine::Impl
         spawnCountdown = 0.0;
         sequenceStep = 0;
         feedbackL = feedbackR = 0.0f;
+        widthSmoothing = 1.f - std::exp(-1.f / static_cast<float>(sampleRate * .02));
         smoothedWidth = 1.f; smoothedSolo = 0.f; matchGain = smoothedMatch = 1.f;
         matchEnabled = matchLearning = false; matchSamples = 0; matchInput = matchOutput = 0.;
         smoothedMix = 0.5f;
@@ -1268,7 +1269,7 @@ struct Engine::Impl
         }
     }
 
-    void renderEffect (const EngineParameters& parameters, int samples)
+    void renderEffect (const EngineParameters& parameters, int samples, int channels)
     {
         const auto bpm = clamp (parameters.bpm, 30.0, 300.0);
         const auto quarter = sampleRate * 60.0 / bpm;
@@ -1414,10 +1415,27 @@ struct Engine::Impl
             smoothedOutput += 0.0015f * (parameters.outputGain - smoothedOutput);
             const auto dryGain = std::cos (clamp (smoothedMix, 0.0f, 1.0f) * pi * 0.5f);
             const auto wetGain = std::sin (clamp (smoothedMix, 0.0f, 1.0f) * pi * 0.5f);
-            wet[0][static_cast<std::size_t> (sample)] = (inputL * dryGain + effectL * wetGain) * smoothedOutput;
-            wet[1][static_cast<std::size_t> (sample)] = (inputR * dryGain + effectR * wetGain) * smoothedOutput;
-            soloCorrection[0][static_cast<std::size_t> (sample)] = effectL * smoothedOutput - wet[0][static_cast<std::size_t> (sample)];
-            soloCorrection[1][static_cast<std::size_t> (sample)] = effectR * smoothedOutput - wet[1][static_cast<std::size_t> (sample)];
+            smoothedWidth += widthSmoothing * (clamp(parameters.width, 0.f, 2.f) - smoothedWidth);
+            // Preserve narrowing and unity. Above unity, ease into at most +10%
+            // side gain; no delay, phase rotation or change to the mono sum.
+            const float sideGain = smoothedWidth <= 1.f ? smoothedWidth
+                : 1.f + .1f * (1.f - std::exp(-3.f * (smoothedWidth - 1.f))) / (1.f - std::exp(-3.f));
+            const auto widen = [channels, sideGain] (float& l, float& r)
+            {
+                if (channels < 2 || sideGain == 1.f) return;
+                const auto mid = (l + r) * .5f, side = (l - r) * .5f * sideGain;
+                l = mid + side; r = mid - side;
+            };
+            auto mixedL = (inputL * dryGain + effectL * wetGain) * smoothedOutput;
+            auto mixedR = (inputR * dryGain + effectR * wetGain) * smoothedOutput;
+            auto soloL = effectL * smoothedOutput, soloR = effectR * smoothedOutput;
+            widen(mixedL, mixedR); widen(soloL, soloR);
+            // Width belongs to the effect print, before POST capture/playback.
+            // Monitor-only controls still leave the recording intact.
+            wet[0][static_cast<std::size_t> (sample)] = mixedL;
+            wet[1][static_cast<std::size_t> (sample)] = mixedR;
+            soloCorrection[0][static_cast<std::size_t> (sample)] = soloL - mixedL;
+            soloCorrection[1][static_cast<std::size_t> (sample)] = soloR - mixedR;
             blockEffectPeak = std::max ({ blockEffectPeak, std::abs (effectL), std::abs (effectR) });
             countedActiveGrains = std::max (countedActiveGrains, active);
         }
@@ -1496,7 +1514,7 @@ struct Engine::Impl
             std::copy_n (dry[1].begin(), samples, stage[1].begin());
         }
 
-        renderEffect (parameters, samples);
+        renderEffect (parameters, samples, actualChannels);
 
         if (! parameters.looperBeforeEffect)
         {
@@ -1517,16 +1535,10 @@ struct Engine::Impl
         for (int sample = 0; sample < samples; ++sample)
         {
             const auto index = static_cast<std::size_t> (sample);
-            smoothedWidth += monitorSmoothing * (parameters.width - smoothedWidth);
             smoothedSolo += monitorSmoothing * ((parameters.wetSolo ? 1.f : 0.f) - smoothedSolo);
             auto monitorL = wet[0][index] + soloCorrection[0][index] * smoothedSolo;
             auto monitorR = wet[1][index] + soloCorrection[1][index] * smoothedSolo;
-            if (actualChannels > 1)
-            {
-                const auto mid = (monitorL + monitorR) * .5f, side = (monitorL - monitorR) * .5f * smoothedWidth;
-                monitorL = mid + side; monitorR = mid - side;
-            }
-            else monitorR = monitorL;
+            if (actualChannels == 1) monitorR = monitorL;
             if (matchLearning && !parameters.bypass)
             {
                 matchInput += .5 * (dry[0][index] * dry[0][index] + dry[actualChannels-1][index] * dry[actualChannels-1][index]);
@@ -1689,6 +1701,7 @@ struct Engine::Impl
     float feedbackL = 0.0f;
     float feedbackR = 0.0f;
     float grainNormalizer = 1.f;
+    float widthSmoothing = .001f;
     float smoothedWidth = 1.f, smoothedSolo = 0.f, matchGain = 1.f, smoothedMatch = 1.f;
     bool matchEnabled = false, matchLearning = false;
     std::uint64_t matchSamples = 0;
