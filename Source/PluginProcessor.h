@@ -75,6 +75,9 @@ public:
     bool isReceivingHostTempo() const noexcept { return receivingHostTempo.load(); }
     void setParameterValue (const char* id, float value);
     void randomizeSound (juce::int64 seed);
+    void initializeSound();
+    void undoInitialization();
+    bool canUndoInitialization() const { return initializationUndoAvailable.load(); }
     void applyFactoryPreset (int index);
     static juce::StringArray factoryPresetNames();
     juce::Result exportAudio (const juce::File&, int historyBars = 0);
@@ -109,6 +112,8 @@ private:
     motefield::Engine engine;
     std::array<std::atomic<int>, 128> midiMap;
     std::atomic<int> currentProgram { 0 };
+    juce::ValueTree initializationUndo;
+    std::atomic<bool> initializationUndoAvailable { false };
     std::atomic<int> midiLearn { -1 }, lastLearned { -1 }, requestedProgram { -1 };
     std::vector<juce::RangedAudioParameter*> midiTargets;
     std::array<int, 128> previousCC {};

@@ -145,6 +145,78 @@ void checkMaterialResponse (const juce::File& destination)
     std::cout << "Material checks passed: distinct bass/mid/treble deformation, snapshot-gap stability and silence settling.\n";
 }
 
+void checkInitialization (MoteFieldAudioProcessor& processor, MoteFieldAudioProcessorEditor& editor, const juce::File& destination)
+{
+    auto* menu = dynamic_cast<juce::ComboBox*> (find (editor, "presets"));
+    require (menu != nullptr, "initialization preset menu missing");
+    const juce::StringArray retained { "mode", "division", "tempo", "sync", "output", "freeze", "bypass",
+        "looperLevel", "looperSpeed", "looperReverse", "looperOrder", "loopQuantize", "loopContinuous",
+        "loopRate", "loopFade", "loopFadeMode", "loopOnly", "loopRecordOrder", "burstGate",
+        "bypassTrails", "holdStyle", "wetSolo", "levelMatch" };
+    const auto phrase = processor.loopData();
+    require (phrase.getSize() > 17, "initialization test requires recorded audio");
+    const auto transport = processor.getLooperState();
+    const auto folder = destination.getNonexistentChildFile ("initialize-checks", {}, false);
+    require (processor.saveUserPreset ("Keep me", false, folder).wasOk(), "init fixture save failed");
+    const auto originalFile = folder.getChildFile ("Keep me.motefield").loadFileAsString();
+    for (int mode = 0; mode < 11; ++mode)
+    {
+        processor.setParameterValue ("mode", static_cast<float> (mode));
+        processor.setParameterValue ("variation", 3.f);
+        processor.setParameterValue ("repeats", .85f);
+        processor.setParameterValue ("modDepth", .7f);
+        processor.setParameterValue ("fieldPitch", 12.f);
+        processor.setParameterValue ("width", 1.8f);
+        processor.setParameterValue ("output", -3.f);
+        processor.setParameterValue ("tempo", 137.f);
+        std::vector<std::pair<juce::String, float>> before;
+        for (auto* parameter : processor.getParameters())
+            if (auto* ranged = dynamic_cast<juce::RangedAudioParameter*> (parameter))
+                before.emplace_back (ranged->paramID, ranged->getValue());
+        const auto name = processor.currentPresetName();
+        const bool modified = processor.isPresetModified();
+        HostParameterObserver host;
+        auto* shape = processor.parameters.getParameter ("shape");
+        shape->addListener (&host);
+        menu->setSelectedId (20002, juce::sendNotificationSync);
+        shape->removeListener (&host);
+        require (host.starts == 1 && host.ends == 1, "initialization did not send balanced host gestures");
+        const auto value = [&] (const char* id) { return processor.parameters.getRawParameterValue (id)->load(); };
+        require (value ("mode") == mode && value ("variation") == 0.f, "initialization changed mode or failed to select A");
+        require (std::abs(value ("width") - 1.f) < .001f && value ("mix") > .3f && value ("repeats") <= .36f
+            && value ("space") == 0.f && value ("modDepth") == 0.f && std::abs(value ("fieldPitch")) < .001f,
+            "initialization did not simplify the sound");
+        for (const auto& [id, previous] : before)
+            if (retained.contains (id) || id.startsWith ("loopRecordTrigger") || id.endsWith ("Trigger"))
+                require (processor.parameters.getParameter (id)->getValue() == previous, "initialization changed a protected control");
+        require (processor.currentPresetName() == juce::String ("Init - ") + motefield::modeNames[static_cast<std::size_t> (mode)]
+            && ! processor.isPresetModified(), "initialized name/baseline incorrect");
+        require (processor.loopData() == phrase && processor.getLooperState() == transport, "initialization changed recorded audio or transport");
+        processor.setParameterValue ("output", -6.f);
+        menu->setSelectedId (20003, juce::sendNotificationSync);
+        for (const auto& [id, previous] : before)
+            if (id != "output") require (std::abs (processor.parameters.getParameter (id)->getValue() - previous) < .00001f, "initialization undo did not restore sound");
+        require (value ("output") == -6.f, "initialization undo reverted a later output change");
+        require (! processor.canUndoInitialization() && processor.currentPresetName() == name
+            && processor.isPresetModified() == modified, "initialization undo lost preset metadata");
+    }
+    require (folder.getChildFile ("Keep me.motefield").loadFileAsString() == originalFile, "initialization overwrote a saved preset");
+    processor.initializeSound();
+    require (processor.saveUserPreset ("My init", false, folder).wasOk(), "initialized sound save failed");
+    require (! processor.canUndoInitialization(), "saving left stale initialization undo");
+    processor.randomizeSound (123);
+    require (processor.loadUserPreset (folder.getChildFile ("My init.motefield")).wasOk(), "initialized sound recall failed");
+    require (processor.parameters.getRawParameterValue ("mode")->load() == 10.f
+        && processor.parameters.getRawParameterValue ("modDepth")->load() == 0.f, "initialized preset did not recall");
+    processor.initializeSound(); processor.applyFactoryPreset (17);
+    require (! processor.canUndoInitialization(), "factory preset left stale initialization undo");
+    juce::MemoryBlock state;
+    juce::AudioProcessor::copyXmlToBinary (*processor.parameters.copyState().createXml(), state);
+    processor.initializeSound(); processor.setStateInformation (state.getData(), static_cast<int> (state.getSize()));
+    require (! processor.canUndoInitialization(), "session restore left stale initialization undo");
+    std::cout << "Initialization checks passed: all 11 modes, menu actions, balanced host gestures, protected controls/loop, exact sound undo, preset identity, disk preservation and save/recall.\n";
+}
+
 void checkPresetsAndAutomation (MoteFieldAudioProcessor& processor, const juce::File& destination)
 {
     using namespace motefield::parameter;
@@ -533,6 +605,8 @@ int main (int argc, char** argv)
             require(processor.loadUserPreset(folder.getChildFile("Random test.motefield")).wasOk() && std::abs(value(motefield::parameter::shape)-firstShape)<.0001f,"Random preset did not recall");
             std::cout<<"Random checks passed: new sounds, host gestures, preserved loop/performance, repeatable seeds and user save/recall.\n";
         }
+        processSilence(); // Commit the preceding preset's pending loop restore.
+        checkInitialization (processor, *editor, destination);
         click (*editor, "erase"); processSilence();
         require (processor.getLooperState() == motefield::LooperState::empty, "erase control failed");
         checkAppearance (*editor,destination);

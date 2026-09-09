@@ -215,6 +215,7 @@ void MoteFieldAudioProcessor::setStateInformation (const void* data, int sizeInB
     if (const auto xml = getXmlFromBinary (data, sizeInBytes))
     {
         if (! xml->hasTagName (parameters.state.getType().toString())) return;
+        initializationUndoAvailable.store (false);
         if (auto* audio = xml->getChildByName ("LoopAudio"))
         { juce::MemoryBlock bytes; if (! bytes.fromBase64Encoding (audio->getAllSubText()) || ! restoreLoopData (bytes)) return; xml->removeChildElement (audio, true); }
         if (auto* mappings = xml->getChildByName ("MidiMappings"))

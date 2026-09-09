@@ -39,6 +39,7 @@ juce::String MoteFieldAudioProcessor::currentPresetSource() const
 
 void MoteFieldAudioProcessor::rememberPreset (const juce::String& name, const juce::String& source)
 {
+    initializationUndoAvailable.store (false);
     parameters.state.setProperty ("presetName", name, nullptr);
     parameters.state.setProperty ("presetSource", source, nullptr);
     const auto old = parameters.state.getChildWithName ("PresetBaseline");
@@ -49,6 +50,80 @@ void MoteFieldAudioProcessor::rememberPreset (const juce::String& name, const ju
             if (isPresetParameter (ranged->paramID))
                 baseline.setProperty (juce::Identifier (ranged->paramID), ranged->getValue(), nullptr);
     parameters.state.addChild (baseline, -1, nullptr);
+}
+
+void MoteFieldAudioProcessor::initializeSound()
+{
+    using namespace motefield::parameter;
+    // Explicit sound controls only: never replace the whole processor state or loop.
+    const juce::StringArray controls { variation, density, repeats, shape, cutoff, mix,
+        space, modDepth, modRate, resonance, reverbStyle, reverse, "width",
+        "viscosity", "cohesion", "tension", "fieldPosition", "fieldPitch", "fieldStretch",
+        "fieldSplit", "magnetAmount", "magnetMode", "magnetAttack", "magnetRelease",
+        "patternSeed", "patternLock", "patternSteps", "rhythmMutation", "pitchMutation",
+        "scale", "scaleRoot", "sourceNote" };
+    const int selectedMode = juce::jlimit (0, 10, juce::roundToInt (parameters.getRawParameterValue (mode)->load()));
+    struct StartingSound { float activity, repeat, contour; };
+    static constexpr std::array<StartingSound, 11> starts {{
+        {.35f, .30f, .40f}, // Bloom: sparse, soft micro loops
+        {.40f, .30f, .45f}, // Chain: short linked fragments
+        {.30f, .30f, .40f}, // Slide: clear pitch movement
+        {.40f, .25f, .30f}, // Veil: a light grain layer
+        {.35f, .30f, .40f}, // Orbit: a small moving cluster
+        {.30f, .25f, .75f}, // Pluck: defined grain attacks
+        {.40f, .20f, .65f}, // Chop: simple rhythmic cuts
+        {.35f, .25f, .60f}, // Break: restrained interruptions
+        {.35f, .30f, .50f}, // Ladder: clear stepped repeats
+        {.35f, .30f, .50f}, // Grid: a short delay pattern
+        {.35f, .35f, .30f}  // Smear: soft, short repeats
+    }};
+    juce::ValueTree previous ("InitializationUndo");
+    previous.setProperty ("name", currentPresetName(), nullptr);
+    previous.setProperty ("source", currentPresetSource(), nullptr);
+    previous.setProperty ("program", currentProgram.load(), nullptr);
+    const auto baseline = parameters.state.getChildWithName ("PresetBaseline");
+    if (baseline.isValid()) previous.addChild (baseline.createCopy(), -1, nullptr);
+    juce::ValueTree values ("Values");
+    values.setProperty (mode, parameters.getParameter (mode)->getValue(), nullptr);
+    for (const auto& id : controls)
+        values.setProperty (juce::Identifier (id), parameters.getParameter (id)->getValue(), nullptr);
+    previous.addChild (values, -1, nullptr);
+
+    const auto start = starts[static_cast<std::size_t> (selectedMode)];
+    for (const auto& id : controls)
+    {
+        auto* parameter = parameters.getParameter (id);
+        float value = parameter->convertFrom0to1 (parameter->getDefaultValue());
+        if (id == density) value = start.activity;
+        else if (id == repeats) value = start.repeat;
+        else if (id == shape) value = start.contour;
+        else if (id == mix) value = .40f;
+        else if (id == space || id == modDepth || id == resonance) value = 0.f;
+        setParameterValue (id.toRawUTF8(), value);
+    }
+    rememberPreset (juce::String ("Init - ") + motefield::modeNames[static_cast<std::size_t> (selectedMode)], "initialized");
+    initializationUndo = previous;
+    initializationUndoAvailable.store (true);
+}
+
+void MoteFieldAudioProcessor::undoInitialization()
+{
+    if (! initializationUndoAvailable.exchange (false)) return;
+    const auto values = initializationUndo.getChildWithName ("Values");
+    for (int i = 0; i < values.getNumProperties(); ++i)
+    {
+        const auto id = values.getPropertyName (i);
+        auto* parameter = parameters.getParameter (id.toString());
+        parameter->beginChangeGesture();
+        parameter->setValueNotifyingHost (static_cast<float> (values[id]));
+        parameter->endChangeGesture();
+    }
+    currentProgram.store (static_cast<int> (initializationUndo["program"]));
+    rememberPreset (initializationUndo["name"].toString(), initializationUndo["source"].toString());
+    parameters.state.removeChild (parameters.state.getChildWithName ("PresetBaseline"), nullptr);
+    const auto baseline = initializationUndo.getChildWithName ("PresetBaseline");
+    if (baseline.isValid()) parameters.state.addChild (baseline.createCopy(), -1, nullptr);
+    initializationUndo = {};
 }
 
 bool MoteFieldAudioProcessor::isPresetModified() const

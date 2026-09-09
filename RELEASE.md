@@ -2,7 +2,7 @@
 
 ## Current status
 
-Version **0.3.5** targets universal macOS VST3/AU and Windows x64 VST3. See [VERIFICATION.md](VERIFICATION.md) for build, installation and host-test results.
+Version **0.3.6** targets universal macOS VST3/AU and Windows x64 VST3. See [VERIFICATION.md](VERIFICATION.md) for build, installation and host-test results.
 
 The repository includes macOS and Windows build jobs that produce unsigned development installers. Public release signing, notarization, clean-machine installation, upgrades, and native host testing remain release checks. Generated bundles and installers are excluded from source control.
 
@@ -55,6 +55,6 @@ Before distributing release binaries:
 - Test clean installation, upgrades, uninstall behavior, and host scanning.
 - Test audio playback, automation recording/playback, preset saving, and session recall in the intended DAWs.
 - Exercise Apple Silicon, Intel macOS, and Windows x64 hosts separately.
-- Record phrase-loop output before closing a session; phrase audio is currently temporary.
+- Verify phrase audio recalls with DAW sessions and user presets, and export WAV files needed outside the plug-in.
 
 An iOS edition requires separate app/AUv3 targets and distribution work; it is not included in the desktop build.

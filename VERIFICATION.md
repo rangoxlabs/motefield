@@ -1,10 +1,18 @@
+# 0.3.6 verification
+
+Adds Initialize sound to the preset menu with a simple variation-A starting sound for each of the 11 modes. Keeps the selected mode, timing/subdivision, output/monitoring, looper controls and recorded audio. A one-step Undo initialization restores the previous sound and preset identity without reverting later changes to protected controls. No parameter IDs or ordering changed (61 host parameters).
+
+Universal macOS AU/VST3/standalone and native preview compilation passed. Native checks passed for initialization through the preset menu in all 11 modes, balanced host gestures, retained loop audio/transport and protected controls, undo value/identity restoration, saved-file preservation, initialized-preset save/recall, and invalidation of stale undo after saving, loading a factory preset or restoring a session. Existing processor integration, appearance, preset/automation, material response and UI checks also passed. Package verification and the Windows build are pending; installed local plug-ins have not been replaced.
+
 # 0.3.5 verification
 
 Width now runs before POST looper capture. Its setting is printed into new POST recordings, so changing Width afterward cannot reshape the stored playback; the WAV export contains that same print. Existing loops remain unchanged. PRE capture remains unprocessed and plays through the live effects as designed.
 
 Above 100%, the control eases into a maximum side gain of 1.10 instead of 2.0. Narrowing and 100% unity are retained. No delays or phase rotation are introduced; the mono sum is unchanged. This reduces added phase sensitivity, but cannot guarantee positive correlation for source material or effects already near or below zero correlation.
 
-Local DSP and click suites passed (62.16 s / 8.13 s), including the 10% side-gain ceiling, unchanged mono sum, a positively correlated wide test signal, POST width printing, identical existing POST playback at 0/100/200%, unchanged export data and preserved PRE routing. Platform package results follow below. Preset initialization is not implemented in this release.
+Local DSP and click suites passed (62.16 s / 8.13 s), including the 10% side-gain ceiling, unchanged mono sum, a positively correlated wide test signal, POST width printing, identical existing POST playback at 0/100/200%, unchanged export data and preserved PRE routing. The wide regression signal retained positive correlation (0.0101) at maximum Width.
+
+Universal macOS AU/VST3/standalone compilation and native processor/UI integration checks passed. The Mac ZIP passed CRC, signatures, 0.3.5 version and payload identity checks, clean install, reinstall backup and corrupt-payload rejection in an isolated installation folder. Mac ZIP SHA-256: `f3a83ad7fe819a2f5ed58dc3ca7cdaf206c62d7348c32416ff6fe81131f319f2`. Windows [run 34301570371](https://github.com/rangoxlabs/motefield/actions/runs/34301570371) passed at `496fe69`: native x64 build, DSP/click tests (23.09 s / 2.71 s), direct-install ZIP checks, and installer/uninstaller checks. Downloaded ZIP CRC, payload manifest, x64 PE architecture, version and ZIP/installer checksums verified. Windows ZIP SHA-256: `955108975dc93cf29baee34f3431a548403de79ffaa2af2dc71eb0ae7033b57a`. The local installed plug-ins were not replaced during this pass. Preset initialization is not implemented in this release.
 
 # 0.3.4 verification
 

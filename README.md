@@ -6,7 +6,7 @@ The clear enclosure, sculpted knob rails, and Acid lighting surround a pearl fer
 
 ![MoteField interface](docs/images/motefield.png)
 
-**Current version: 0.3.5 development.** Available as universal macOS AU/VST3 and Windows x64 VST3 test builds. See [VERIFICATION.md](VERIFICATION.md) for checks and remaining host-specific validation.
+**Current version: 0.3.6 development.** Available as universal macOS AU/VST3 and Windows x64 VST3 test builds. See [VERIFICATION.md](VERIFICATION.md) for checks and remaining host-specific validation.
 
 ## Included effects
 
@@ -85,6 +85,8 @@ Record up to 60 seconds and layer it independently of the selected effect.
 ## Presets and automation
 
 The preset menu has **Factory** and **User** submenus. Choose from 32 factory starting points covering all eleven modes, or use **Save** to name the current sound. Replacing an existing user preset requires confirmation. An asterisk marks changes from the selected preset, and its name is retained with the DAW session.
+
+**Initialize sound** in the preset menu keeps the selected effect mode and loads a simple variation-A starting sound with modest Activity and Repeats, Mix at 40%, Width at 100%, and no added Space or Drift. Material, pitch, pattern and sidechain sound controls return to defaults. Timing/subdivision, output level, monitoring, Hold/Bypass, all looper settings, recorded audio, MIDI mappings and appearance are retained. The preset name becomes **Init - Orbit** (or the current mode). **Undo initialization** restores the previous sound and preset identity; loading, saving or randomizing a sound, or restoring a session, clears this one-step undo. Use **SAVE** to keep your initialized sound. POST recordings keep their captured sound; PRE recordings continue through the live effects.
 
 **RANDOM**, beside the preset picker, creates a new sound across effect mode, variation, Activity, Shape, Filter, Mix, Repeats, Space, Drift, subdivision, reverb character, and FX reverse. It uses bounded starting ranges and sends parameter changes to the host. Recorded audio, looper settings, Hold, Bypass, tempo/sync, and output gain are retained. Click **SAVE** to keep the result as a user preset.
 

@@ -769,7 +769,7 @@ MoteFieldAudioProcessorEditor::MoteFieldAudioProcessorEditor (MoteFieldAudioProc
     performanceButton.onClick = [this] { if (! performancePanel) { performancePanel = std::make_unique<PerformancePanel> (processor); addAndMakeVisible (*performancePanel); } performancePanel->setBounds (getLocalBounds().reduced (14)); performancePanel->sendLookAndFeelChange(); performancePanel->setVisible (true); performancePanel->toFront (true); };
     setupButton (motionButton, "LESS MOTION", "Keep the liquid voices in fixed positions while their size follows the sound.", true);
     motionButton.onClick = [this] { fieldDisplay.setReducedMotion (motionButton.getToggleState()); };
-    setupCombo (presetBox, {}, "Factory and User presets. Loop audio, Hold and Bypass are retained.");
+    setupCombo (presetBox, {}, "Factory and User presets, or Initialize sound for a simple starting point in the current mode.");
     presetBox.setTextWhenNothingSelected ("Current sound");
     presetBox.setComponentID ("presets");
     refreshPresetMenu();
@@ -903,6 +903,9 @@ void MoteFieldAudioProcessorEditor::refreshPresetMenu()
     for (int i = 0; i < names.size(); ++i) factory.addItem (i + 1, names[i]);
     for (int i = 0; i < userPresets.size(); ++i) user.addItem (1001 + i, userPresets[i].getFileNameWithoutExtension());
     if (userPresets.isEmpty()) user.addItem (19999, "No saved presets yet", false);
+    menu->addItem (20002, "Initialize sound");
+    menu->addItem (20003, "Undo initialization", processor.canUndoInitialization());
+    menu->addSeparator();
     menu->addSubMenu ("Factory", factory);
     menu->addSubMenu ("User", user);
     menu->addSeparator();
@@ -921,6 +924,8 @@ void MoteFieldAudioProcessorEditor::selectPresetItem (int id)
     }
     else if (id == 20000) showSavePresetDialog();
     else if (id == 20001) refreshPresetMenu();
+    else if (id == 20002) { processor.initializeSound(); refreshPresetMenu(); }
+    else if (id == 20003) { processor.undoInitialization(); refreshPresetMenu(); }
     presetBox.setText (processor.currentPresetName(), juce::dontSendNotification);
 }
 
@@ -1007,6 +1012,9 @@ juce::String MoteFieldAudioProcessorEditor::currentHelp() const
 }
 void MoteFieldAudioProcessorEditor::refreshDisplay()
 {
+    for (juce::PopupMenu::MenuItemIterator item (*presetBox.getRootMenu()); item.next();)
+        if (item.getItem().itemID == 20003)
+            item.getItem().isEnabled = processor.canUndoInitialization();
     using namespace motefield::parameter;
     if (appearanceRevision != appearancePreferences->revision) applyAppearance();
     if (lastSync != (value (motefield::parameter::sync) > .5f) && ! knobs[4]->slider.isMouseButtonDown()) updateTimeAttachment();
