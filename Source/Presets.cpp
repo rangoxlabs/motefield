@@ -7,7 +7,7 @@
 bool MoteFieldAudioProcessor::isPresetParameter (const juce::String& id)
 {
     // A sound preset never starts transport, freezes capture, or bypasses audio.
-    if (id == motefield::parameter::freeze || id == motefield::parameter::bypass || id == "burstGate" || id == "wetSolo" || id == "levelMatch") return false;
+    if (id == motefield::parameter::freeze || id == motefield::parameter::bypass || id == "burstGate" || id == "reverbSolo" || id == "wetSolo" || id == "levelMatch") return false;
     for (const auto* trigger : motefield::parameter::looperTriggers) if (id == trigger) return false;
     return true;
 }

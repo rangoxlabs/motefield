@@ -1,3 +1,9 @@
+# Pending interface review on the 0.3.7 engine
+
+Local branch `fix/037-details-reverb-monitor`, based on released 0.3.7. Not installed, packaged, or pushed. Details is now a page within the center/right display area; the main controls, looper, and window retain their dimensions. Compact tuning readout/reset faces align. Reverb Solo is appended as parameter 66 with AU version hint 7, leaving the existing IDs/order intact; it is excluded from sound presets and missing legacy state defaults it off. It monitors the existing reverb return at the current Space/Output/Width settings after capture, mutes POST playback only in the audition monitor, takes priority over Wet Solo, and smooths transitions. Closing Details ends audition. Existing reverb algorithms and factory voicings are unchanged.
+
+Universal Release native preview and DSP/click targets built successfully. Native integration passed, including Details size preservation at 1000/1620 pixels, tuning alignment, audition attachment and dismissal, legacy defaults, presets and all 66 host parameters. Native screenshots inspected. DSP and click suites passed (77.49 s / 8.95 s), including subtraction-based isolation checks for all four reverb styles, Wet Solo priority, zero-Space silence, bypass and unchanged POST recording. Review artifact: `Design/037-Details-Review-2026-09-10-v1/Review.html`. Actual host verification and release builds remain pending interface review.
+
 # 0.3.7 verification
 
 Adds factory recall of tuning/material/pattern state, five tuned factory presets (37 total), an in-place tuning page, and next-beat/bar recording with optional one-bar count-in and fixed lengths. Four parameters are appended, preserving all 61 existing parameter IDs/order (65 total). Factory references remain 440 Hz; old sessions and presets default missing new controls without dropping stored transpose.

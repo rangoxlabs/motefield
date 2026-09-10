@@ -13,7 +13,7 @@ class TuningPanel final : public juce::Component
         void paintButton (juce::Graphics& g, bool over, bool) override
         {
             const auto s = getWidth() / 240.f;
-            g.addTransform (juce::AffineTransform::scale (s));
+            g.addTransform (juce::AffineTransform::scale (s, getHeight() / 48.f));
             g.setColour (juce::Colour (over ? 0xff30392e : 0xff232a23)); g.fillRoundedRectangle (0, 0, 240, 48, 6);
             g.setColour (juce::Colour (0xff778568)); g.drawRoundedRectangle (0.5f, .5f, 239, 47, 6, 1);
             panel.label (g, "TRANSPOSE", 8, 4, 125, 18, 10);
@@ -22,6 +22,21 @@ class TuningPanel final : public juce::Component
             panel.label (g, "A4 " + juce::String (panel.value ("tuningReference"), 1).trimCharactersAtEnd ("0").trimCharactersAtEnd (".") + " Hz", 142, 25, 88, 18, 10);
         }
         TuningPanel& panel;
+    };
+    class ResetButton final : public juce::TextButton
+    {
+        void paintButton (juce::Graphics& g, bool over, bool down) override
+        {
+            const auto b = getLocalBounds().toFloat().reduced (.5f);
+            g.setColour (juce::Colour (over || down ? 0xff30392e : 0xff232a23)); g.fillRoundedRectangle (b, 6);
+            g.setColour (juce::Colour (0xff778568)); g.drawRoundedRectangle (b, 6, 1);
+            g.setColour (juce::Colour (0xffd4dccf));
+            const auto cx=b.getCentreX(), cy=b.getCentreY(), r=juce::jmin(b.getWidth()*.23f,b.getHeight()*.18f);
+            juce::Path arc; arc.addCentredArc(cx,cy,r,r,0,.7f,5.8f,true);
+            g.strokePath(arc,juce::PathStrokeType(1.8f,juce::PathStrokeType::curved,juce::PathStrokeType::rounded));
+            juce::Path arrow;arrow.startNewSubPath(cx-r*.9f,cy-r*.7f);arrow.lineTo(cx-r*.46f,cy-r*.89f);arrow.lineTo(cx-r*.44f,cy-r*1.4f);
+            g.strokePath(arrow,juce::PathStrokeType(1.8f));
+        }
     };
 public:
     explicit TuningPanel (MoteFieldAudioProcessor& owner) : processor (owner), readout (*this)
@@ -104,7 +119,7 @@ public:
     }
     void resized() override
     {
-        if (! opened) { auto area = getLocalBounds(); reset.setBounds (area.removeFromRight (juce::roundToInt (getWidth() * .15f))); readout.setBounds (area); return; }
+        if (! opened) { auto area = getLocalBounds(); reset.setBounds (area.removeFromRight (juce::roundToInt (getWidth() * .15f))); area.removeFromRight (juce::roundToInt (getWidth() * .025f)); readout.setBounds (area); return; }
         const auto s = getWidth() / 240.f, sy = getHeight() / 305.f;
         const auto place = [s, sy] (juce::Component& c, float x, float y, float w, float h) { c.setBounds (juce::Rectangle<float> (x*s,y*sy,w*s,h*sy).toNearestInt()); };
         place (back,0,0,27,27); place (minus,107,38,27,30); place (transpose,139,38,62,30); place (plus,206,38,27,30);
@@ -146,7 +161,8 @@ private:
     void commitReference() { if (! refreshing && opened) { processor.setParameterValue ("tuningReference", juce::jlimit (1.f,20000.f,reference.getText().getFloatValue())); refresh(); } }
     MoteFieldAudioProcessor& processor;
     Readout readout;
-    juce::TextButton reset, back, minus, plus, a432, a440;
+    ResetButton reset;
+    juce::TextButton back, minus, plus, a432, a440;
     juce::TextEditor transpose, cents, reference;
     juce::Slider range;
     bool opened = false, refreshing = false, sliding = false;

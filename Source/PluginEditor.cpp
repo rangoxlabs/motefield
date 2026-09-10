@@ -284,7 +284,7 @@ void ParameterKnob::paint (juce::Graphics& g)
 {
     const auto [paper, ink, muted, line, blue, cyan, coral, yellow, mint] = appearance::read (*this);
     const auto h = static_cast<float> (getHeight());
-    text (g, title, { 0.0f, h * .83f, static_cast<float> (getWidth()), h * .17f }, h * .113f, ink, false, juce::Justification::centred, .01f);
+    text (g, title, { 0.0f, h * .83f, static_cast<float> (getWidth()), h * .17f }, h * .113f, getProperties()["darkControl"] ? juce::Colour(0xffeff3f3) : ink, false, juce::Justification::centred, .01f);
 }
 
 void FieldDisplay::update (const motefield::VisualFrame& next)
@@ -730,6 +730,8 @@ MoteFieldAudioProcessorEditor::MoteFieldAudioProcessorEditor (MoteFieldAudioProc
     holdButton.onStateChange = [this] { if (value ("holdStyle") > .5f) { const bool down = holdButton.isDown(); if (down != momentaryHoldDown) { momentaryHoldDown = down; processor.setParameterValue ("freeze", down ? 1.f : 0.f); } } };
     attachButton (bypass, bypassButton);
     setupButton (wetSoloButton, "WET SOLO", "Hear the effect without the live dry blend. Keeps your Mix setting and recorded loop.", true);
+    setupButton (reverbSoloButton, "REVERB SOLO", "Audition only the reverb return at the current Space amount. Does not change Mix or recorded audio. Turn off or close Details to return.", true);
+    attachButton ("reverbSolo", reverbSoloButton);
     setupButton (levelMatchButton, "LEVEL MATCH", "Measure three seconds of input and output, then hold level compensation. Relearns after sound changes; waits for signal during silence.", true);
     attachButton ("wetSolo", wetSoloButton); attachButton ("levelMatch", levelMatchButton);
     tuningPanel = std::make_unique<TuningPanel> (processor);
@@ -980,32 +982,13 @@ void MoteFieldAudioProcessorEditor::savePresetNamed (const juce::String& name, b
 void MoteFieldAudioProcessorEditor::setDetailsOpen (bool open)
 {
     if (detailsOpen == open) return;
-    if (open) collapsedWidth = getWidth();
-    const auto previousHeight = getHeight();
+    if (tuningPanel && tuningPanel->isOpen()) tuningPanel->setOpen (false);
     detailsOpen = open;
-    const auto height = detailsOpen ? 1220.0 : 972.0;
-    // Opening the drawer must not grow beyond the window's existing height.
-    // Also allow smaller sizes when the host window sits near a screen edge.
-    auto width = open ? juce::jmin (getWidth(), static_cast<int> (previousHeight * 1620.0 / height)) : collapsedWidth;
-    auto maximumWidth = 1860;
-    const auto screen = getScreenBounds();
-    if (const auto* display = juce::Desktop::getInstance().getDisplays().getDisplayForRect (screen))
-    {
-        const auto available = display->userBounds.reduced (12.0f);
-        const auto scaleX = static_cast<float> (screen.getWidth()) / static_cast<float> (juce::jmax (1, getWidth()));
-        const auto scaleY = static_cast<float> (screen.getHeight()) / static_cast<float> (juce::jmax (1, getHeight()));
-        const auto roomWidth = (available.getRight() - juce::jmax (available.getX(), static_cast<float> (screen.getX()))) / juce::jmax (.1f, scaleX);
-        const auto roomHeight = (available.getBottom() - juce::jmax (available.getY(), static_cast<float> (screen.getY()))) / juce::jmax (.1f, scaleY);
-        maximumWidth = juce::jmax (1, juce::jmin (maximumWidth, static_cast<int> (roomWidth), static_cast<int> (roomHeight * 1620.0 / height)));
-    }
-    width = juce::jlimit (1, maximumWidth, width);
-    const auto minimumWidth = juce::jmin (1000, width);
-    getConstrainer()->setFixedAspectRatio (1620.0 / height);
-    setResizeLimits (minimumWidth, juce::roundToInt (minimumWidth * height / 1620.0), maximumWidth, juce::roundToInt (maximumWidth * height / 1620.0));
-    setSize (width, juce::roundToInt (width * height / 1620.0));
-    detailsButton.setButtonText (detailsOpen ? "DETAILS -" : "DETAILS +");
-    resized();
+    // Details is a page of the existing display, never a window resize.
+    if (! open) processor.setParameterValue ("reverbSolo", 0.f);
+    resized(); repaint();
 }
+
 juce::String MoteFieldAudioProcessorEditor::currentHelp() const
 {
     auto* hovered = juce::Desktop::getInstance().getMainMouseSource().getComponentUnderMouse();
@@ -1041,7 +1024,7 @@ void MoteFieldAudioProcessorEditor::refreshDisplay()
     frame.width = value ("width");
     frame.fieldPitch = value ("fieldPitch"); frame.fieldPosition = value ("fieldPosition"); frame.fieldStretch = value ("fieldStretch"); frame.fieldSplit = value ("fieldSplit");
     if (tuningPanel) tuningPanel->refresh();
-    matchStatus.setText (value ("levelMatch") < .5f ? "OUTPUT MONITOR" : frame.matchLearning ? "LEVEL MATCH / LEARNING" : "LEVEL MATCH / " + juce::String (juce::Decibels::gainToDecibels(frame.matchGain), 1) + " dB", juce::dontSendNotification);
+    matchStatus.setText (value ("reverbSolo") > .5f ? "REVERB SOLO / DETAILS" : value ("levelMatch") < .5f ? "OUTPUT MONITOR" : frame.matchLearning ? "LEVEL MATCH / LEARNING" : "LEVEL MATCH / " + juce::String (juce::Decibels::gainToDecibels(frame.matchGain), 1) + " dB", juce::dontSendNotification);
     fieldDisplay.setSampleRate (processor.getSampleRate());
     fieldDisplay.setShape (value (shape));
     fieldDisplay.update (frame);
@@ -1094,7 +1077,7 @@ void MoteFieldAudioProcessorEditor::resized()
 {
     const auto s=static_cast<float>(getWidth())/1620.f;
     const auto place=[s](juce::Component& c,float x,float y,float w,float h){c.setBounds(juce::Rectangle<float>(x*s,y*s,w*s,h*s).toNearestInt());};
-    const auto height=detailsOpen?1220:972;
+    const auto height=972;
     if(!hardwarePanel.isValid()||hardwarePanel.getHeight()!=height)hardwarePanel=makeHardwarePanel(height,lookAndFeel.colours);
     for(auto& b:modeButtons)b.getProperties().set("glassDark",true);
     for(int i=0;i<4;++i)place(*knobs[i],443+i*201,79,116,133);
@@ -1125,9 +1108,17 @@ void MoteFieldAudioProcessorEditor::resized()
     place(tempoLabel,245,878,119,45);tempoLabel.setFont(font(13*s));place(performanceButton,363,878,89,45);
     place(randomPresetButton,806,34,100,48);
     place(presetBox,978,34,288,48);place(previousPreset,918,34,52,48);place(nextPreset,1277,34,46,48);place(savePresetButton,1333,34,74,48);
-    for(int i=8;i<12;++i){knobs[i]->setVisible(detailsOpen);place(*knobs[i],60+(i-8)*210,1000,164,178);}
+    fieldDisplay.setVisible (! detailsOpen);
+    if (tuningPanel) tuningPanel->setVisible (! detailsOpen);
+    for (auto* c : std::array<juce::Component*,4> { &matchStatus, &wetSoloButton, &levelMatchButton, &reverseButton })
+        c->setVisible (! detailsOpen && ! tuningPanel->isOpen());
+    for(int i=8;i<12;++i){knobs[i]->setVisible(detailsOpen);knobs[i]->getProperties().set("darkControl",true);place(*knobs[i],467+(i-8)*173,309,142,160);}
     for(auto* c:std::array<juce::Component*,4>{&roomBox,&speedBox,&divisionBox,&motionButton})c->setVisible(detailsOpen);
-    place(roomBox,962,1020,234,42);place(speedBox,1240,1020,290,42);place(divisionBox,962,1112,234,42);place(motionButton,1240,1112,290,42);
+    reverbSoloButton.setVisible (detailsOpen);
+    reverbSoloButton.getProperties().set ("darkControl",true);
+    motionButton.getProperties().set ("darkControl",true);
+    place(roomBox,1236,288,240,40);place(reverbSoloButton,1236,338,240,40);
+    place(speedBox,1236,418,240,40);place(divisionBox,477,497,220,37);place(motionButton,886,497,220,37);
 }
 
 void MoteFieldAudioProcessorEditor::paint(juce::Graphics& g)
@@ -1147,5 +1138,15 @@ void MoteFieldAudioProcessorEditor::paint(juce::Graphics& g)
     if (f.loopPending) status = f.loopWaiting ? "WAIT FOR HOST" : "IN " + juce::String (f.loopCountdown, 1) + " BEATS";
     else if (state == motefield::LooperState::recording && f.recordingBars > 0) status = "REC " + juce::String (f.recordingBar) + "/" + juce::String (f.recordingBars) + " BARS";
     text(g,status,{95,825,164,24},15,p.cyan);
-    if(detailsOpen){text(g,"REVERB CHARACTER",{962,992,234,24},13,p.muted);text(g,"LOOP SPEED",{1240,992,260,24},13,p.muted);text(g,"SUBDIVISION",{962,1084,234,24},13,p.muted);text(g,"DISPLAY",{1240,1084,234,24},13,p.muted);}
+    if(detailsOpen)
+    {
+        const auto labelColour=juce::Colour(0xffd5dcd4);
+        text(g,"DETAILS",{477,247,600,30},18,labelColour);
+        text(g,"REVERB CHARACTER",{1236,255,240,24},13,labelColour);
+        text(g,"LOOP SPEED",{1236,386,240,24},13,labelColour);
+        text(g,"SUBDIVISION",{477,472,220,23},12,labelColour);
+        text(g,"DISPLAY",{886,472,220,23},12,labelColour);
+        text(g,"Solo follows the Space amount.",{1236,473,240,23},11,labelColour);
+        text(g,"Close Details to return.",{1236,498,240,23},11,labelColour);
+    }
 }

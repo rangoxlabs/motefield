@@ -1046,7 +1046,7 @@ struct Engine::Impl
         sequenceStep = 0;
         feedbackL = feedbackR = 0.0f;
         widthSmoothing = 1.f - std::exp(-1.f / static_cast<float>(sampleRate * .02));
-        smoothedWidth = 1.f; smoothedSolo = 0.f; matchGain = smoothedMatch = 1.f;
+        smoothedWidth = 1.f; smoothedSolo = smoothedReverbSolo = 0.f; matchGain = smoothedMatch = 1.f;
         matchEnabled = matchLearning = false; matchSamples = 0; matchInput = matchOutput = 0.;
         smoothedMix = 0.5f;
         grainNormalizer = 1.f;
@@ -1080,6 +1080,7 @@ struct Engine::Impl
         for (auto& channel : stage) channel.resize (static_cast<std::size_t> (samples));
         for (auto& channel : wet) channel.resize (static_cast<std::size_t> (samples));
         for (auto& channel : soloCorrection) channel.resize (static_cast<std::size_t> (samples));
+        for (auto& channel : reverbReturn) channel.resize (static_cast<std::size_t> (samples));
     }
 
     void rememberOnset() noexcept
@@ -1464,6 +1465,11 @@ struct Engine::Impl
             auto mixedR = (inputR * dryGain + effectR * wetGain) * smoothedOutput;
             auto soloL = effectL * smoothedOutput, soloR = effectR * smoothedOutput;
             widen(mixedL, mixedR); widen(soloL, soloR);
+            auto roomL = reverbL * parameters.space * 1.18f * smoothedOutput;
+            auto roomR = reverbR * parameters.space * 1.18f * smoothedOutput;
+            widen(roomL, roomR);
+            reverbReturn[0][static_cast<std::size_t> (sample)] = roomL;
+            reverbReturn[1][static_cast<std::size_t> (sample)] = roomR;
             // Width belongs to the effect print, before POST capture/playback.
             // Monitor-only controls still leave the recording intact.
             wet[0][static_cast<std::size_t> (sample)] = mixedL;
@@ -1511,7 +1517,7 @@ struct Engine::Impl
             parameters.density, parameters.repeats, parameters.shape, parameters.cutoffHz, parameters.space,
             parameters.resonance, parameters.modulationDepth, parameters.modulationRateHz,
             static_cast<float>(parameters.division), static_cast<float>(parameters.reverbStyle),
-            parameters.fieldPitch, parameters.fieldStretch, parameters.reverse ? 1.f : 0.f, parameters.looperLevel };
+            parameters.fieldPitch, parameters.fieldStretch, parameters.reverse ? 1.f : 0.f, parameters.looperLevel, parameters.reverbSolo ? 1.f : 0.f };
         if (parameters.levelMatch && (!matchEnabled || settings != matchSettings))
         { matchLearning = true; matchSamples = 0; matchInput = matchOutput = 0.; }
         if (!parameters.levelMatch) { matchLearning = false; matchGain = 1.f; }
@@ -1572,6 +1578,11 @@ struct Engine::Impl
             smoothedSolo += monitorSmoothing * ((parameters.wetSolo ? 1.f : 0.f) - smoothedSolo);
             auto monitorL = wet[0][index] + soloCorrection[0][index] * smoothedSolo;
             auto monitorR = wet[1][index] + soloCorrection[1][index] * smoothedSolo;
+            // Audition after capture: isolate the return, including muting POST
+            // playback in the monitor only. Wet Solo resumes when audition ends.
+            smoothedReverbSolo += monitorSmoothing * ((parameters.reverbSolo ? 1.f : 0.f) - smoothedReverbSolo);
+            monitorL = lerp (monitorL, reverbReturn[0][index], smoothedReverbSolo);
+            monitorR = lerp (monitorR, reverbReturn[1][index], smoothedReverbSolo);
             if (actualChannels == 1) monitorR = monitorL;
             if (matchLearning && !parameters.bypass)
             {
@@ -1727,7 +1738,7 @@ struct Engine::Impl
     std::array<double, 8> onsetAges {};
     std::array<std::vector<float>, 2> dry;
     std::array<std::vector<float>, 2> stage;
-    std::array<std::vector<float>, 2> wet, soloCorrection;
+    std::array<std::vector<float>, 2> wet, soloCorrection, reverbReturn;
     Random random, pitchRandom;
     int onsetCount = 0;
     int sequenceStep = 0, eventStep = 0;
@@ -1736,11 +1747,11 @@ struct Engine::Impl
     float feedbackR = 0.0f;
     float grainNormalizer = 1.f;
     float widthSmoothing = .001f;
-    float smoothedWidth = 1.f, smoothedSolo = 0.f, matchGain = 1.f, smoothedMatch = 1.f;
+    float smoothedWidth = 1.f, smoothedSolo = 0.f, smoothedReverbSolo = 0.f, matchGain = 1.f, smoothedMatch = 1.f;
     bool matchEnabled = false, matchLearning = false;
     std::uint64_t matchSamples = 0;
     double matchInput = 0., matchOutput = 0.;
-    std::array<float, 20> matchSettings {};
+    std::array<float, 21> matchSettings {};
     float smoothedMix = 0.5f;
     float smoothedCutoff = 18000.0f;
     float smoothedOutput = 1.0f;

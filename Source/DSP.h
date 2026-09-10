@@ -72,7 +72,7 @@ struct EngineParameters
     float mix = 0.5f;
     float outputGain = 1.0f;
     float width = 1.0f;
-    bool wetSolo = false, levelMatch = false;
+    bool wetSolo = false, levelMatch = false, reverbSolo = false;
     float looperLevel = 0.75f;
     float looperSpeed = 1.0f;
     bool looperReverse = false;

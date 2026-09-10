@@ -562,6 +562,31 @@ void testOutputMonitoring()
     p.width=1.f; p.wetSolo=true; auto solo=render(p);
     p.wetSolo=false;p.mix=1.f; auto wet=render(p);
     for(int i=0;i<block;++i) require(std::abs(std::get<2>(solo)[i]-std::get<2>(wet)[i])<.00005f,"Wet Solo differs from fully wet signal");
+    // A direct source into the effects chain lets us subtract the known
+    // pre-reverb path and independently verify exactly what is soloed.
+    motefield::EngineParameters room; room.looperOnly=true; room.mix=1.f; room.space=.6f;
+    for(int style=0;style<4;++style)
+    {
+        room.reverbStyle=style; room.reverbSolo=false;room.space=.6f;room.mix=1.f;
+        const auto full=render(room);
+        room.space=0.f; const auto pre=render(room);
+        room.space=.6f;room.mix=0.f;room.reverbSolo=true; const auto isolated=render(room);
+        room.wetSolo=true; const auto both=render(room);room.wetSolo=false;
+        double energy=0.;
+        for(int i=0;i<block;++i)
+        {
+            const auto expectedL=std::get<2>(full)[i]-.82f*std::get<2>(pre)[i];
+            const auto expectedR=std::get<3>(full)[i]-.82f*std::get<3>(pre)[i];
+            require(std::abs(std::get<2>(isolated)[i]-expectedL)<.00005f && std::abs(std::get<3>(isolated)[i]-expectedR)<.00005f,"Reverb Solo contains dry signal or differs from return");
+            require(std::abs(std::get<2>(isolated)[i]-std::get<2>(both)[i])<.00005f,"Wet Solo leaks into Reverb Solo");
+            energy+=expectedL*expectedL+expectedR*expectedR;
+        }
+        require(energy>1.e-7,"reverb character audition is silent");
+    }
+    room.space=0.f; const auto noRoom=render(room);
+    for(float x:std::get<2>(noRoom)) require(std::abs(x)<.00001f,"Reverb Solo leaks dry at zero Space");
+    room.bypass=true; const auto roomBypass=render(room);
+    for(int i=0;i<block;++i) require(std::abs(std::get<0>(roomBypass)[i]-std::get<2>(roomBypass)[i])<.00005f,"Reverb Solo alters bypass");
     p.mix=0.f;p.outputGain=.5f;p.levelMatch=true;
     auto matched=render(p); const auto matchedFrame=std::get<4>(matched);
     require(!matchedFrame.matchLearning && std::abs(matchedFrame.matchGain-2.f)<.02f,"Level Match failed to compensate -6 dB");
@@ -572,7 +597,7 @@ void testOutputMonitoring()
     for(int i=0;i<block;++i) require(std::abs(std::get<0>(bypassed)[i]-std::get<2>(bypassed)[i])<.00005f,"monitor controls altered bypass");
     // Monitoring must not print into a POST recording.
     motefield::Engine first,second; first.prepare(sampleRate,block,2);second.prepare(sampleRate,block,2);
-    motefield::EngineParameters normal;normal.mix=.35f;auto monitored=normal;monitored.wetSolo=true;monitored.levelMatch=true;
+    motefield::EngineParameters normal;normal.mix=.35f;auto monitored=normal;monitored.wetSolo=true;monitored.levelMatch=true;monitored.reverbSolo=true;
     first.requestLooperCommand(motefield::LooperCommand::record); second.requestLooperCommand(motefield::LooperCommand::record);
     std::array<float,block> in {},a {},b {};in.fill(.05f);const float* inputs[]{in.data(),in.data()};float* outputs[]{a.data(),b.data()};
     for(int i=0;i<100;++i){first.process(inputs,outputs,2,block,normal);second.process(inputs,outputs,2,block,monitored);}

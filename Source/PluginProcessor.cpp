@@ -128,6 +128,7 @@ void MoteFieldAudioProcessor::processAudio (juce::AudioBuffer<float>& buffer, in
     values.reverbStyle = juce::jlimit (0, 3, static_cast<int> (std::lround (load (motefield::parameter::reverbStyle))));
     values.mix = load (motefield::parameter::mix);
     values.width = load ("width");
+    values.reverbSolo = load ("reverbSolo") > .5f;
     values.wetSolo = load ("wetSolo") > .5f;
     values.levelMatch = load ("levelMatch") > .5f;
     values.outputGain = decibelsToGain (load (motefield::parameter::output));
@@ -406,6 +407,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout MoteFieldAudioProcessor::cre
     layout.add (std::make_unique<juce::AudioParameterChoice> (ParameterID { "loopRecordStart", 6 }, "Recording starts", juce::StringArray { "Follow loop quantize", "Immediately", "Next beat", "Next bar" }, 0));
     layout.add (std::make_unique<juce::AudioParameterChoice> (ParameterID { "loopCountIn", 6 }, "Recording count-in", juce::StringArray { "Off", "One bar" }, 0));
     layout.add (std::make_unique<juce::AudioParameterChoice> (ParameterID { "loopLength", 6 }, "Recording length", juce::StringArray { "Free (60 sec max)", "1 bar", "2 bars", "4 bars", "8 bars" }, 0));
+    layout.add (std::make_unique<juce::AudioParameterBool> (ParameterID { "reverbSolo", 7 }, "Reverb Solo", false));
     return layout;
 }
 

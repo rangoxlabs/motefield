@@ -144,7 +144,7 @@ private:
     std::vector<std::unique_ptr<ParameterKnob>> knobs;
     std::vector<std::unique_ptr<SliderAttachment>> sliderAttachments;
     std::unique_ptr<SliderAttachment> timeAttachment;
-    juce::TextButton reverseButton, syncButton, tapButton, holdButton, bypassButton, wetSoloButton, levelMatchButton;
+    juce::TextButton reverseButton, syncButton, tapButton, holdButton, bypassButton, wetSoloButton, levelMatchButton, reverbSoloButton;
     juce::Label matchStatus;
     std::unique_ptr<TuningPanel> tuningPanel;
     juce::TextButton recordButton, playButton, dubButton, stopButton, undoButton, eraseButton;
@@ -157,7 +157,6 @@ private:
     std::vector<std::unique_ptr<ComboAttachment>> comboAttachments;
     juce::Label tempoLabel, timeValueLabel;
     bool detailsOpen = false, lastSync = false;
-    int collapsedWidth = 1000;
     double lastTap = 0.0, tapInterval = 0.0;
     int tapCount = 0, tapFlash = 0;
     juce::Array<juce::File> userPresets;
