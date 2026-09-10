@@ -113,4 +113,8 @@ if(MOTEFIELD_BUILD_TESTS)
     target_include_directories(MoteFieldClickTests PRIVATE Source)
     target_compile_features(MoteFieldClickTests PRIVATE cxx_std_20)
     add_test(NAME MoteFieldClickTests COMMAND MoteFieldClickTests)
+    # Offline diagnostic: reports response rather than treating musical taste as a pass/fail test.
+    add_executable(MoteFieldResponseBench Source/DSP.cpp Tests/ResponseBench.cpp)
+    target_include_directories(MoteFieldResponseBench PRIVATE Source)
+    target_compile_features(MoteFieldResponseBench PRIVATE cxx_std_20)
 endif()
