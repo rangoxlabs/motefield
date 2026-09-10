@@ -65,7 +65,6 @@ private:
         float x = .5f, y = .5f, radiusX = .04f, radiusY = .2f;
         float energy = 0.0f, heat = 0.0f, bend = 0.0f;
         bool seen = false;
-        std::uint64_t group = 0;
     };
     struct SurfaceBody
     {

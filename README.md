@@ -6,15 +6,7 @@ The clear enclosure, sculpted knob rails, and Acid lighting surround a pearl fer
 
 ![MoteField interface](docs/images/motefield.png)
 
-**Current branch: 0.4.0 development beta.** Targets universal macOS AU/VST3 and Windows x64 VST3 test builds. The main branch remains on 0.3.7 while these engine changes are tested. See [VERIFICATION.md](VERIFICATION.md) for checks and remaining host-specific validation.
-
-## Musical response in 0.4.0
-
-Quiet notes and slow swells now feed retained audio fragments instead of depending on a loud attack. Micro-loop and granular voices repeat those fragments with crossfaded seams. Rhythmic modes use deliberate pulse relationships, rests, accents, and staggered entries; Slide curves its glides in musical pitch intervals. Octave-centered starting patterns avoid imposing a major harmony on the input.
-
-**Keep phrase**, in Perform, retains the source audio as well as the event pattern. If no audio is available, it waits for the first sound. Rhythm and pitch mutations explore the kept material independently. Kept source audio is included in saved projects and user presets, separately from the phrase looper; use Capture or loop recording to print the resulting performance, then export WAV. The reactor groups repeated source fragments and pitch registers into related liquid bodies.
-
-The spatial stage uses a modulated eight-path feedback network. Rhythmic delay taps and recirculating feedback are independent; Smear adds envelope-shaped filtering and resonant movement. Filter also controls the tail, with low-frequency damping in the feedback path. These changes update the sound of existing presets; parameter IDs remain stable.
+**Current version: 0.3.7 development.** Available as universal macOS AU/VST3 and Windows x64 VST3 test builds. See [VERIFICATION.md](VERIFICATION.md) for checks and remaining host-specific validation.
 
 ## Included effects
 
@@ -25,12 +17,12 @@ Select an effect by turning the mode dial or clicking its name. The pointer alig
 | Micro Loops | **Bloom** | Layers overlapping phrases at related playback speeds. Variations introduce upper octaves, lower octaves, or a cycling speed pattern for swelling, harmonically layered loops. |
 | Micro Loops | **Chain** | Reads recent audio in a repeating slice sequence to build rhythmic phrases. Variations add half-speed and octave-related playback; D also introduces stepped amplitude quantization for a rougher texture. |
 | Micro Loops | **Slide** | Bends the playback speed within each loop, creating rising, falling, or alternating pitch sweeps. Repeats extends the phrases and their overlap. |
-| Granules | **Veil** | Scatters many small grains across recent audio to create a diffuse cloud. Variations range from gentle detuning to evolving pitch motion and octave layers. Shape also changes grain length. |
-| Granules | **Orbit** | Stretches retained fragments into sustained layers. A stays at the source pitch, B moves down an octave, C adds an envelope-following resonant filter, and D glides from an octave below toward the source pitch. |
-| Granules | **Pluck** | Builds articulated repeats from captured notes, including quiet notes and slow swells. A/B focus on the newest note; C/D revisit recent notes. Variations add staggered timing, detuning, or octave-up voices. |
+| Granules | **Veil** | Scatters many small grains across recent audio to create a diffuse cloud. Variations range from slight detuning to wider pitch motion and octave layers. Shape also changes grain length. |
+| Granules | **Orbit** | Overlaps long grains from different points in the recent capture, building sustained, slowly evolving textures. Variations include half-speed playback and pitch glides. |
+| Granules | **Pluck** | Uses detected note attacks to choose where grains begin, keeping fragments connected to the articulation of the source. Variations add slight detuning or occasional octave-up voices. |
 | Glitch | **Chop** | Replays short slices as rapid rhythmic cuts, with note attacks able to retrigger the pattern. Variations add changing playback speeds, octave steps, and a quantized texture. |
-| Glitch | **Break** | Produces intermittent bursts with gaps between them. Activity fills deliberate rhythmic rests; detected attacks can trigger fresh fragments. Variations change pitch and playback speed. |
-| Glitch | **Ladder** | Sequences recent fragments through octave-related pitch patterns. Activity changes the phrase length and how many recent notes it visits. Variations reorder the registers; D also adds amplitude quantization. |
+| Glitch | **Break** | Produces intermittent bursts with gaps between them. Activity changes the likelihood and rate of events; detected attacks can trigger fresh fragments. Variations change pitch and playback speed. |
+| Glitch | **Ladder** | Steps individual fragments through repeating pitch-ratio sequences, using recent note attacks when available. Variations offer ascending, descending, octave, or reordered patterns; D adds amplitude quantization. |
 | Multi Delay | **Grid** | Creates tempo-related stereo tap patterns. Activity changes the tap count, Repeats controls feedback, and A-D selects the timing arrangement. Grid uses a delay-tap view because Shape does not affect this mode. |
 | Multi Delay | **Smear** | Blends multi-tap delay with granular playback and independently filtered taps. Variation B adds bandpass-style tap filtering; C adds octave-shifted taps. Shape changes modulation, smoothing, cross-feedback, and grain envelopes, turning distinct repeats into a more diffuse texture. |
 
@@ -43,8 +35,8 @@ Select an effect by turning the mode dial or clicking its name. The pointer alig
 | **Space** | Adds the selected reverb character to the effect signal. |
 | **Bright reverb** | The least-damped, shortest-feedback reverb character. |
 | **Dark reverb** | Stronger high-frequency damping for a darker tail. |
-| **Hall reverb** | Longer delay paths and feedback for a larger, modulated stereo space. |
-| **Infinite reverb** | The longest delay paths and slowest-decaying reverb character. Despite the name, its tail decays; use Hold to sustain captured material. |
+| **Hall reverb** | Longer feedback and greater stereo width for a larger space. |
+| **Infinite reverb** | The longest-feedback and widest reverb character. Despite the name, its tail decays; use Hold to sustain captured material. |
 | **FX Reverse** | Reverses effect playback. It is independent of the phrase looper's reverse control. |
 | **Hold** | Stops replacing the recent capture while playback continues. In Grid and Smear, it captures and repeats the recent delay phrase. |
 | **Width** | 0% mono, 100% original. Above 100%, a gentle curve caps added side gain at 10%, without delays or changing the mono sum. Width is printed into POST recordings; subsequent knob changes affect the live path, not the stored loop. PRE recordings remain upstream of the effects. Also changes the reactor’s horizontal spread. |
@@ -58,8 +50,8 @@ Select an effect by turning the mode dial or clicking its name. The pointer alig
 | Control | Role |
 | --- | --- |
 | **Activity** | Changes event density, overlapping voice count, or delay tap count, depending on the mode. |
-| **Shape** | Changes the volume contour of newly created grains. Also changes glide trajectory in Slide, grain length in Veil and delay character in Smear. Not used by Grid. |
-| **Filter** | Sets the low-pass cutoff and shapes the stored reverb tail. |
+| **Shape** | Changes the volume contour of newly created grains. Also changes grain length in Veil and delay character in Smear. Not used by Grid. |
+| **Filter** | Sets the low-pass cutoff. |
 | **Mix** | Sets the dry/effect balance. |
 | **Time** | Chooses a rhythmic subdivision when synced, or internal tempo in manual mode. |
 | **Repeats** | Extends grain duration and feedback, or delay feedback, depending on the mode. |
@@ -167,7 +159,7 @@ The surface remains a ferrofluid-inspired interpretation with damped motion, not
 
 ### Pattern & MIDI
 
-**Pattern seed** reproduces event choices from the same source and starting timeline. **Keep phrase** retains the source fragments and repeats its sequence over 1–64 events, suppressing input-onset retriggering. With no source yet, it captures the first sound before keeping it. **Mutate rhythm** varies rests and pattern placement; **Mutate pitch** adds repeatable intervals independently. Delay modes vary tap spacing and pitch. Kept source audio saves with projects and user presets; a rendered loop remains a separate recording.
+**Pattern seed** reproduces the engine's random choices from the same input and starting timeline position. **Lock pattern** repeats its sequence of choices over 1–64 events and suppresses input-onset retriggering. It does not freeze source audio. **Mutate rhythm** changes event spacing/probability; **Mutate pitch** adds repeatable pitch intervals independently. Delay modes mutate tap spacing and pitch.
 
 Choose **Source note**, **Scale root**, and a major, minor, or pentatonic scale to constrain grain transpositions. Source note is set manually; this does not detect and retune every note in polyphonic audio. Sweeps can travel between the constrained endpoints. Grid's delay taps do not use the grain scale controls.
 

@@ -83,8 +83,6 @@ void MoteFieldAudioProcessor::initializeSound()
     previous.setProperty ("program", currentProgram.load(), nullptr);
     const auto baseline = parameters.state.getChildWithName ("PresetBaseline");
     if (baseline.isValid()) previous.addChild (baseline.createCopy(), -1, nullptr);
-    if (parameters.getRawParameterValue ("patternLock")->load() > .5f)
-        previous.setProperty ("keptPhrase", phraseData().toBase64Encoding(), nullptr);
     juce::ValueTree values ("Values");
     values.setProperty (mode, parameters.getParameter (mode)->getValue(), nullptr);
     for (const auto& id : controls)
@@ -110,11 +108,6 @@ void MoteFieldAudioProcessor::initializeSound()
 
 void MoteFieldAudioProcessor::undoInitialization()
 {
-    if (initializationUndoAvailable.load() && initializationUndo.hasProperty ("keptPhrase"))
-    {
-        juce::MemoryBlock source;
-        if (! source.fromBase64Encoding (initializationUndo["keptPhrase"].toString()) || ! restorePhraseData (source)) return;
-    }
     if (! initializationUndoAvailable.exchange (false)) return;
     const auto values = initializationUndo.getChildWithName ("Values");
     for (int i = 0; i < values.getNumProperties(); ++i)
@@ -178,11 +171,6 @@ juce::Result MoteFieldAudioProcessor::saveUserPreset (const juce::String& reques
             }
     const auto audioData = loopData();
     if (audioData.getSize() > 17) document.createNewChildElement ("LoopAudio")->addTextElement (audioData.toBase64Encoding());
-    if (parameters.getRawParameterValue ("patternLock")->load() > .5f)
-    {
-        const auto material = phraseData();
-        if (material.getSize() > 156) document.createNewChildElement ("PhraseAudio")->addTextElement (material.toBase64Encoding());
-    }
     // Write beside the destination and replace only after a complete, flushed write.
     juce::TemporaryFile temporary (file);
     if (! document.writeTo (temporary.getFile()) || ! temporary.overwriteTargetFileWithTemporary())
@@ -204,7 +192,7 @@ juce::Result MoteFieldAudioProcessor::loadUserPreset (const juce::File& file)
     std::set<juce::String> seen;
     for (const auto* child : document->getChildIterator())
     {
-        if (child->hasTagName ("LoopAudio") || child->hasTagName ("PhraseAudio")) continue;
+        if (child->hasTagName ("LoopAudio")) continue;
         const auto id = child->getStringAttribute ("id");
         auto* parameter = parameters.getParameter (id);
         const auto text = child->getStringAttribute ("value").trim();
@@ -224,17 +212,9 @@ juce::Result MoteFieldAudioProcessor::loadUserPreset (const juce::File& file)
                     values.emplace_back (parameters.getParameter (ranged->paramID), ranged->getDefaultValue());
                 else return juce::Result::fail ("This preset is incomplete. Your sound has not changed.");
             }
-    juce::MemoryBlock material;
-    if (const auto* audio = document->getChildByName ("PhraseAudio"))
-    {
-        if (! material.fromBase64Encoding (audio->getAllSubText()) || ! restorePhraseData (material, true))
-            return juce::Result::fail ("The saved phrase contains invalid audio. Your sound has not changed.");
-    }
     if (const auto* audio = document->getChildByName ("LoopAudio"))
     { juce::MemoryBlock bytes; if (! bytes.fromBase64Encoding (audio->getAllSubText()) || ! restoreLoopData (bytes))
         return juce::Result::fail ("The saved loop could not be loaded. Resume audio playback and try again."); }
-    if (material.getSize() > 0 && ! restorePhraseData (material))
-        return juce::Result::fail ("The previous phrase is still loading. Resume audio playback and try again.");
     // Validation finishes before any host-visible values change.
     for (const auto& [parameter, normalized] : values)
     {

@@ -149,7 +149,7 @@ public:
         instructions.setBounds (8, 6, width - 16, 80);
         instructions.setText (page == 1 ? "Record immediately, on the next beat/bar, or with a one-bar count-in. Fixed lengths finish automatically (60-second maximum). Synced arming waits for host playback; SUBDIV off uses internal 4/4. Follow loop quantize keeps legacy Beat/Off behavior. Loops save with projects and user presets. Capture replaces the phrase; drag WAV to export."
             : page == 2 ? "On the fluid: drag to scan / transpose, Shift-drag to stretch, Alt-drag to split. Double-click resets the gesture. Viscosity slows the response; Cohesion gathers voices; Tension sharpens their envelope. Feed the Magnet sidechain from another track."
-            : "Keep phrase retains the captured fragments and repeats the event pattern. Mutate rhythm or pitch separately; saved presets include kept audio. If empty, Keep waits for your first sound. Source note, root and scale constrain transposition, not notes inside a chord. Program changes 1-37 select factory presets.", juce::dontSendNotification);
+            : "Lock repeats the chosen event pattern; mutations change rhythm or pitch separately. Set Source note to your input's tonal center, then choose a root and scale. This constrains transposition, not individual notes inside a chord. Program changes 1-32 select factory presets.", juce::dontSendNotification);
         content.setSize (width, y); viewport.setViewPosition (0,0);
     }
 private:

@@ -382,30 +382,7 @@ void checkPerformanceIntegration (const juce::File& root)
     require (p.loopData().getSize() > data.getSize(),"history capture did not replace loop");
     juce::MemoryBlock broken (data); static_cast<char*> (broken.getData())[0] = 0;
     require (! p.restoreLoopData (broken),"corrupt audio archive accepted");
-    {
-        MoteFieldAudioProcessor material; material.prepareToPlay (48000,400);
-        material.setParameterValue ("mode",0); material.setParameterValue ("mix",1);
-        juce::AudioBuffer<float> signal(2,400); juce::MidiBuffer noMidi;
-        for (int chunk=0;chunk<120;++chunk)
-        {
-            for(int i=0;i<400;++i) { const float v=.015f*std::sin((chunk*400+i)*2.f*juce::MathConstants<float>::pi*220.f/48000.f); signal.setSample(0,i,v);signal.setSample(1,i,v); }
-            material.processBlock(signal,noMidi);
-        }
-        material.setParameterValue ("patternLock",1); signal.clear(); material.processBlock(signal,noMidi);
-        const auto kept=material.phraseData(); require(kept.getSize()>156,"Keep did not serialize source audio");
-        juce::MemoryBlock session;material.getStateInformation(session);
-        MoteFieldAudioProcessor recall;recall.setStateInformation(session.getData(),static_cast<int>(session.getSize()));
-        recall.prepareToPlay(48000,400);signal.clear();recall.processBlock(signal,noMidi);
-        require(recall.phraseData()==kept,"session changed retained source");
-        require(material.saveUserPreset("Kept source",true,destination).wasOk(),"kept-source preset save failed");
-        require(recall.loadUserPreset(destination.getChildFile("Kept source.motefield")).wasOk(),"kept-source preset restore failed");
-        signal.clear();recall.processBlock(signal,noMidi);
-        require(recall.phraseData()==kept,"user preset changed retained source");
-        auto damaged=kept;static_cast<char*>(damaged.getData())[0]=0;
-        require(!recall.restorePhraseData(damaged),"corrupt retained-source archive accepted");
-        require(recall.phraseData()==kept,"invalid archive changed retained source");
-    }
-    std::cout << "Integration: MIDI, loop WAV/session/preset recall, kept-source session/preset recall, sidechain, history and corrupt-audio rejection passed.\n";
+    std::cout << "Integration: sample-offset MIDI learn, release behavior, WAV export, session/preset audio recall, sidechain routing, history capture and corrupt-audio rejection passed.\n";
 }
 }
 

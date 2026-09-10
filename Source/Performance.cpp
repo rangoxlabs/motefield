@@ -27,7 +27,7 @@ const Control controls[] {
     {"magnetAttack", "Magnet attack seconds",.001f,.5f,.01f,.001f,nullptr},
     {"magnetRelease", "Magnet release seconds",.01f,3,.25f,.01f,nullptr},
     {"patternSeed", "Pattern seed",1,65535,1,1,nullptr},
-    {"patternLock", "Keep phrase",0,1,0,1,"Evolving|Kept"},
+    {"patternLock", "Lock pattern",0,1,0,1,"Evolving|Locked"},
     {"patternSteps", "Pattern length",1,64,16,1,nullptr},
     {"rhythmMutation", "Rhythm mutation",0,127,0,1,nullptr},
     {"pitchMutation", "Pitch mutation",0,127,0,1,nullptr},
@@ -86,41 +86,6 @@ bool MoteFieldAudioProcessor::restoreLoopData (const juce::MemoryBlock& bytes)
     if (prepared && ! engine.restoreLoop (snapshot)) return false;
     pendingLoopData = bytes;
     return true;
-}
-juce::MemoryBlock MoteFieldAudioProcessor::phraseData()
-{
-    std::lock_guard<std::mutex> lock (archiveMutex);
-    if (! prepared && pendingPhraseData.getSize() > 0) return pendingPhraseData;
-    const auto snapshot = prepared ? engine.snapshotPhrase() : motefield::PhraseSnapshot {};
-    juce::MemoryBlock data; juce::MemoryOutputStream out (data, false);
-    out.writeInt (0x4d465031); out.writeDouble (snapshot.sampleRate);
-    for (std::size_t i = 0; i < snapshot.lengths.size(); ++i)
-    { out.writeInt (snapshot.lengths[i]); out.writeInt64 (static_cast<juce::int64> (snapshot.identities[i])); }
-    for (const auto& c : snapshot.audio) for (float sample : c) out.writeFloat (sample);
-    return data;
-}
-bool MoteFieldAudioProcessor::restorePhraseData (const juce::MemoryBlock& bytes, bool validateOnly)
-{
-    constexpr std::size_t header = 12 + 12 * 12;
-    if (bytes.getSize() < header) return false;
-    juce::MemoryInputStream in (bytes, false); motefield::PhraseSnapshot snapshot;
-    if (in.readInt() != 0x4d465031) return false;
-    snapshot.sampleRate = in.readDouble();
-    if (! std::isfinite (snapshot.sampleRate) || snapshot.sampleRate < 8000 || snapshot.sampleRate > 384000) return false;
-    std::size_t total = 0;
-    for (std::size_t i = 0; i < snapshot.lengths.size(); ++i)
-    {
-        snapshot.lengths[i] = in.readInt(); const auto identity = in.readInt64();
-        if (snapshot.lengths[i] < 0 || snapshot.lengths[i] > std::ceil (snapshot.sampleRate) || identity < 0) return false;
-        snapshot.identities[i] = static_cast<std::uint64_t> (identity); total += static_cast<std::size_t> (snapshot.lengths[i]);
-    }
-    if (bytes.getSize() != header + total * 8) return false;
-    for (auto& c : snapshot.audio)
-    { c.resize (total); for (auto& v : c) { v = in.readFloat(); if (! std::isfinite (v)) return false; } }
-    if (validateOnly) return true;
-    std::lock_guard<std::mutex> lock (archiveMutex);
-    if (prepared && ! engine.restorePhrase (snapshot)) return false;
-    pendingPhraseData = bytes; return true;
 }
 juce::Result MoteFieldAudioProcessor::exportAudio (const juce::File& file, int historyBars)
 {

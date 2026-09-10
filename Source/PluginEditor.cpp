@@ -345,8 +345,6 @@ void FieldDisplay::update (const motefield::VisualFrame& next)
         // The sample window deforms the body; it is never drawn as a static card.
         const auto bend = std::tanh ((voice.waveform[4] - voice.waveform[18]) * 7.0f) * .35f;
         if (! existing) *mote = { voice.id, x, y, radiusX, radiusY, .0f, heat, bend, true };
-        mote->group = voice.sourceId == 0 ? voice.id : voice.sourceId * 7u
-            + static_cast<std::uint64_t> (64 + juce::roundToInt (std::log2 (juce::jmax (.0625f, std::abs (voice.rate))) * 2.f));
         mote->seen = true;
         const auto amount = reducedMotion ? 1.0f : follow;
         mote->x += (x - mote->x) * amount;
@@ -384,7 +382,7 @@ void FieldDisplay::update (const motefield::VisualFrame& next)
     for (const auto& voice : liquidVoices)
     {
         if (next.bypass || voice.energy < .00001f) continue;
-        auto& cluster = clusters[voice.group % clusters.size()];
+        auto& cluster = clusters[voice.id % clusters.size()];
         cluster.energy += voice.energy;cluster.x += voice.x * voice.energy;
         cluster.y += voice.y * voice.energy;cluster.bend += voice.bend * voice.energy;
         weight += voice.energy;meanX += voice.x * voice.energy;meanY += voice.y * voice.energy;
@@ -561,6 +559,13 @@ void FieldDisplay::paint (juce::Graphics& g)
     const auto title = juce::String (motefield::modeNames[static_cast<std::size_t> (mode)])
                        + " / " + juce::String::charToString (static_cast<juce::juce_wchar> ('A' + frame.variation));
 
+    if (frame.held || frame.bypass)
+    {
+        const auto badge = juce::Rectangle<float> (146.0f * s, 14.0f * s, 66.0f * s, 21.0f * s);
+        g.setColour (frame.bypass ? line : yellow);
+        g.fillRoundedRectangle (badge, 9.0f * s);
+        text (g, frame.bypass ? "BYPASS" : "HELD", badge, 10.0f * s, ink, true, juce::Justification::centred, .08f);
+    }
     const auto view = area.reduced (16.0f * s, 14.0f * s);
     const auto stage = view.withWidth (view.getWidth() * .69f);
     juce::Graphics::ScopedSaveState save (g);
@@ -569,14 +574,6 @@ void FieldDisplay::paint (juce::Graphics& g)
     g.setImageResamplingQuality (juce::Graphics::highResamplingQuality);
     // Inset the entire material, including split satellites, to leave travel room.
     g.drawImage (liquidImage,stage.reduced(stage.getWidth()*.025f,0));
-
-    if (frame.held || frame.bypass || frame.phraseKept)
-    {
-        const auto badge = juce::Rectangle<float> (146.0f * s, 14.0f * s, 66.0f * s, 21.0f * s);
-        g.setColour (frame.bypass ? line : yellow);
-        g.fillRoundedRectangle (badge, 9.0f * s);
-        text (g, frame.bypass ? "BYPASS" : frame.phraseKept ? "KEPT" : "HELD", badge, 10.0f * s, ink, true, juce::Justification::centred, .08f);
-    }
 
     if (! envelopeVisible) return;
     const auto contour = view.withTrimmedLeft (view.getWidth() * .75f).withTrimmedBottom(112.f*s);

@@ -10,7 +10,6 @@
 #include <vector>
 #include <thread>
 #include <tuple>
-#include <chrono>
 
 namespace { thread_local bool watchingAudioAllocations = false; thread_local int audioAllocations = 0; }
 void* operator new (std::size_t size)
@@ -120,22 +119,13 @@ void testAllModesAndVariations()
 {
     for (int mode = 0; mode < static_cast<int> (motefield::Mode::count); ++mode)
     {
-        std::array<Render, 4> variations;
         for (int variation = 0; variation < 4; ++variation)
         {
-            variations[variation] = renderMode (static_cast<motefield::Mode> (mode), variation, 193);
-            const auto& render = variations[variation];
+            const auto render = renderMode (static_cast<motefield::Mode> (mode), variation, 193);
             require (render.energy > 0.001, std::string (motefield::modeNames[static_cast<std::size_t> (mode)])
                                              + " variation " + std::to_string (variation + 1) + " was silent");
             require (render.peak < 16.0f, std::string (motefield::modeNames[static_cast<std::size_t> (mode)])
                                            + " variation " + std::to_string (variation + 1) + " was unstable");
-        }
-        for (int a=0;a<4;++a) for (int b=a+1;b<4;++b)
-        {
-            double difference=0.;
-            for (std::size_t i=0;i<variations[a].left.size();++i)
-                difference+=std::abs(variations[a].left[i]-variations[b].left[i]);
-            require(difference>1.,std::string(motefield::modeNames[static_cast<std::size_t>(mode)])+" has indistinguishable variations");
         }
     }
 }
@@ -690,108 +680,10 @@ void testScheduledRecording()
     std::cout<<"Recording timing passed: exact four-bar count-in capture, host stopped/restart, 3/4, 1/4, 1/8, cancel, tempo change, overdub and legacy beat quantize.\n";
 }
 
-void testRetainedPhrases()
-{
-    constexpr int block = 128;
-    motefield::Engine engine; engine.prepare (48000., block, 2);
-    motefield::EngineParameters p; p.mode = motefield::Mode::pluck; p.mix = 1; p.space = 0;
-    std::array<float,block> l {}, r {}, a {}, b {};
-    const float* inputs[] {l.data(),r.data()}; float* outputs[] {a.data(),b.data()};
-    int clock = 0;
-    const auto render = [&] (int frames, float amplitude, float frequency)
-    {
-        double energy = 0.;
-        for (int k=0;k<frames;++k)
-        {
-            for(int i=0;i<block;++i) { l[i]=amplitude*std::sin(twoPi*frequency*(clock+i)/48000.f); r[i]=-l[i]; }
-            watchingAudioAllocations=true; engine.process(inputs,outputs,2,block,p); watchingAudioAllocations=false;
-            for(int i=0;i<block;++i) { require(std::isfinite(a[i])&&std::isfinite(b[i]),"retained phrase nonfinite"); energy+=a[i]*a[i]+b[i]*b[i]; }
-            clock+=block;
-        }
-        return energy;
-    };
-    require(render(160,.012f,220.f)>.001,"quiet anti-phase note did not trigger Pluck");
-    p.patternLock=true; render(10,0.f,220.f);
-    const auto kept=engine.snapshotPhrase();
-    require(!kept.audio[0].empty(),"Keep did not retain any source");
-    require(render(400,.25f,330.f)>.001,"kept phrase stopped sounding");
-    const auto after=engine.snapshotPhrase();
-    require(kept.audio==after.audio && kept.lengths==after.lengths && kept.identities==after.identities,
-            "live input overwrote kept material");
-    require(engine.restorePhrase(kept),"kept phrase restore rejected");
-    require(engine.restorePhrase(kept),"queued phrase could not be replaced before audio resumed");
-    render(400,0.f,220.f);
-    require(engine.snapshotPhrase().audio==kept.audio,"kept source changed on recall");
-    auto corrupt=kept; corrupt.audio[0][0]=std::numeric_limits<float>::quiet_NaN();
-    require(!engine.restorePhrase(corrupt),"invalid kept source accepted");
-    engine.prepare(24000.,block,2); require(engine.restorePhrase(kept),"kept source resampling rejected");
-    render(1,0.f,220.f);
-    const auto resampled=engine.snapshotPhrase();
-    for(std::size_t i=0;i<kept.lengths.size();++i)
-        require(std::abs(resampled.lengths[i]*2-kept.lengths[i])<=1,"kept source changed duration across rates");
-    require(audioAllocations==0,"retained source allocated on audio thread");
-    std::atomic<bool> finished { false };
-    std::thread audio ([&]
-    {
-        while (! finished.load()) render(1,0.f,220.f);
-        require(audioAllocations==0,"concurrent phrase restore allocated in audio callback");
-    });
-    for (int i=0;i<32;++i)
-    {
-        require(engine.restorePhrase(resampled),"concurrent kept-source restore failed");
-        const auto copy=engine.snapshotPhrase();
-        require(copy.audio==resampled.audio && copy.identities==resampled.identities,
-                "concurrent snapshot returned changed source audio");
-    }
-    finished.store(true); audio.join();
-    std::cout<<"Retained phrases: quiet/opposite-polarity capture, stable Keep, recall, queued replacement, invalid data and resampling passed.\n";
-}
-
-void testResponseRateBoundaries()
-{
-    constexpr int block=257;
-    for (double rate : {8000.,44100.,96000.,192000.})
-    {
-        double elapsed=0., rendered=0.; float peak=0.f;
-        for (auto mode : {motefield::Mode::bloom,motefield::Mode::veil,motefield::Mode::smear})
-        {
-            motefield::Engine engine; engine.prepare(rate,block,2);
-            motefield::EngineParameters p; p.mode=mode;p.mix=1.f;p.density=1.f;p.repeats=1.f;
-            p.space=1.f;p.reverbStyle=3;p.shape=.8f;p.resonance=.9f;
-            std::array<float,block> l{},r{},a{},b{}; const float* input[]{l.data(),r.data()};float* output[]{a.data(),b.data()};
-            double energy=0.;const auto start=std::chrono::steady_clock::now();
-            for (int offset=0;offset<static_cast<int>(rate*6.);offset+=block)
-            {
-                for(int i=0;i<block;++i)
-                {
-                    const double t=(offset+i)/rate;
-                    l[i]=t<1.? .3f*static_cast<float>(std::sin(twoPi*220.*t)):0.f;
-                    r[i]=-.8f*l[i];
-                }
-                p.variation=std::min(3,static_cast<int>(offset/rate));
-                p.cutoffHz=offset<rate*3.?18000.f:300.f;
-                watchingAudioAllocations=true;engine.process(input,output,2,block,p);watchingAudioAllocations=false;
-                for(int i=0;i<block;++i)
-                {
-                    require(std::isfinite(a[i])&&std::isfinite(b[i]),"response rate boundary emitted nonfinite output");
-                    peak=std::max({peak,std::abs(a[i]),std::abs(b[i])});energy+=a[i]*a[i]+b[i]*b[i];
-                }
-            }
-            elapsed+=std::chrono::duration<double>(std::chrono::steady_clock::now()-start).count();rendered+=6.;
-            require(energy>.001,"response rate boundary was silent");
-        }
-        require(peak<4.f,"maximum feedback response became unstable");
-        require(audioAllocations==0,"response rate boundary allocated in audio callback");
-        std::cout<<"Response boundary "<<rate<<" Hz: peak "<<peak<<", offline CPU/audio ratio "<<elapsed/rendered<<".\n";
-    }
-}
-
 } // namespace
 
 int main (int argc, char**)
 {
-    testRetainedPhrases();
-    testResponseRateBoundaries();
     testScheduledRecording();
     testWidthPrintAndMonoCompatibility();
     testOutputMonitoring();

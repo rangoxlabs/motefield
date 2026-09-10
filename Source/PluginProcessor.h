@@ -84,8 +84,6 @@ public:
     juce::Result captureHistory (int bars);
     juce::MemoryBlock loopData();
     bool restoreLoopData (const juce::MemoryBlock&);
-    juce::MemoryBlock phraseData();
-    bool restorePhraseData (const juce::MemoryBlock&, bool validateOnly = false);
     void learnMidi (int parameterIndex) { midiLearn.store (parameterIndex); }
     int learnedController() const { return lastLearned.load(); }
     void clearMidiMappings();
@@ -123,7 +121,6 @@ private:
     bool previousBurst = false;
     std::mutex archiveMutex;
     juce::MemoryBlock pendingLoopData;
-    juce::MemoryBlock pendingPhraseData;
     bool prepared = false;
     double currentSampleRate = 44100.0;
 

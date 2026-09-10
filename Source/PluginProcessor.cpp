@@ -32,21 +32,17 @@ MoteFieldAudioProcessor::~MoteFieldAudioProcessor()
 void MoteFieldAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 {
     auto saved = loopData();
-    auto material = phraseData();
     { std::lock_guard<std::mutex> lock (archiveMutex);
       engine.prepare (sampleRate, samplesPerBlock, getTotalNumOutputChannels()); prepared = true; currentSampleRate = sampleRate; }
     if (saved.getSize() > 0) restoreLoopData (saved);
-    if (material.getSize() > 156) restorePhraseData (material);
     pendingLooperTriggers.store (0);
 }
 
 void MoteFieldAudioProcessor::releaseResources()
 {
     auto saved = loopData();
-    auto material = phraseData();
     std::lock_guard<std::mutex> lock (archiveMutex);
     pendingLoopData = saved; prepared = false;
-    pendingPhraseData = material;
 }
 
 bool MoteFieldAudioProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
@@ -214,7 +210,6 @@ void MoteFieldAudioProcessor::getStateInformation (juce::MemoryBlock& destinatio
     if (const auto xml = parameters.copyState().createXml())
     {
         auto* audio = xml->createNewChildElement ("LoopAudio"); audio->addTextElement (loopData().toBase64Encoding());
-        xml->createNewChildElement ("PhraseAudio")->addTextElement (phraseData().toBase64Encoding());
         auto* mappings = xml->createNewChildElement ("MidiMappings");
         for (std::size_t cc = 0; cc < midiMap.size(); ++cc) if (midiMap[cc].load() >= 0)
         { auto* map = mappings->createNewChildElement ("CC"); map->setAttribute ("cc", static_cast<int> (cc)); map->setAttribute ("target", midiTargets[static_cast<std::size_t> (midiMap[cc].load())]->paramID); }
@@ -228,12 +223,6 @@ void MoteFieldAudioProcessor::setStateInformation (const void* data, int sizeInB
     {
         if (! xml->hasTagName (parameters.state.getType().toString())) return;
         initializationUndoAvailable.store (false);
-        juce::MemoryBlock material;
-        if (auto* audio = xml->getChildByName ("PhraseAudio"))
-        {
-            if (! material.fromBase64Encoding (audio->getAllSubText()) || ! restorePhraseData (material, true)) return;
-            xml->removeChildElement (audio, true);
-        }
         if (auto* audio = xml->getChildByName ("LoopAudio"))
         { juce::MemoryBlock bytes; if (! bytes.fromBase64Encoding (audio->getAllSubText()) || ! restoreLoopData (bytes)) return; xml->removeChildElement (audio, true); }
         if (auto* mappings = xml->getChildByName ("MidiMappings"))
@@ -242,7 +231,6 @@ void MoteFieldAudioProcessor::setStateInformation (const void* data, int sizeInB
             { const auto cc = map->getIntAttribute ("cc", -1); if (cc >= 0 && cc < 128) midiMap[static_cast<std::size_t> (cc)].store (static_cast<int> (i)); }
           xml->removeChildElement (mappings, true); }
         auto restored = juce::ValueTree::fromXml (*xml);
-        if (material.getSize() > 0 && ! restorePhraseData (material)) return;
         for (const auto& id : extendedParameterIds())
         {
             bool found = false; for (const auto child : restored) found = found || child.getProperty ("id").toString() == id;
