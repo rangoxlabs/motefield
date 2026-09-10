@@ -1,3 +1,17 @@
+# 0.4.0 development beta verification
+
+On `feature/musical-response`; main and the locally installed plug-ins remain 0.3.7. This beta directly updates the engine sound, while retaining all 65 parameter IDs/order.
+
+Universal macOS AU/VST3 and native preview compilation passed. The final DSP and click suites passed (124.43 s / 9.36 s). Coverage includes all 44 variations and pairwise distinction within each mode, quiet opposite-polarity input, retained-source capture/recall/resampling, concurrent source snapshots/restores, invalid source rejection, and the existing loop timing, export, width, monitoring, pattern and buffer checks. Additional maximum-activity/repeats/space cases passed at 8, 44.1, 96 and 192 kHz across Bloom, Veil and Smear, including changing variations and tail filtering; the instrumented processing callbacks allocated no heap memory.
+
+AddressSanitizer and UndefinedBehaviorSanitizer passed the retained-source, rate-boundary, recording, width, monitoring, performance and material subset. Leak detection was disabled. Concurrent snapshot checks are functional and sanitizer coverage, not a ThreadSanitizer result.
+
+Native integration passed for kept-source audio in sessions loaded before preparation and in user preset files, corrupt archives, the 37 factory presets, all 65 automatable parameters, initialization, tuning, appearance, material response and layout. Screenshots were inspected. The main layout is retained; Perform now names the existing pattern control **Keep phrase**, explains first-sound arming and audio persistence, and the reactor can display **KEPT**.
+
+The Mac ZIP passed CRC, payload signatures, universal architecture/version checks, clean installation and replacement with backup, exact installed-binary comparison, quarantine clearance on its staged bundles and corrupt-payload rejection before writing destinations. These checks used an isolated installation root. Mac ZIP SHA-256: `4e7217ba4d5217990c98593b1ea0125bb4a30e79a9cf0a87236a068f549df0f7`. The real installed 0.3.7 plug-ins were not replaced; AU validation of 0.4.0 in the installed environment and real DAW playback remain pending.
+
+Windows CI and the response/audition receipt will be recorded below after completion. These tests establish software behavior and signal integrity, not subjective musical approval or equivalence to any hardware effect.
+
 # 0.3.7 verification
 
 Adds factory recall of tuning/material/pattern state, five tuned factory presets (37 total), an in-place tuning page, and next-beat/bar recording with optional one-bar count-in and fixed lengths. Four parameters are appended, preserving all 61 existing parameter IDs/order (65 total). Factory references remain 440 Hz; old sessions and presets default missing new controls without dropping stored transpose.

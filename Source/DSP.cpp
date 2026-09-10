@@ -1,4 +1,6 @@
 #include "DSP.h"
+#include "PhraseCapture.h"
+#include "DiffuseSpace.h"
 
 #include <algorithm>
 #include <array>
@@ -147,6 +149,18 @@ struct Grain
     float envelopePower = 1.0f;
     float readSpan = 96000.f, tone = 1.f, filterStateL = 0.f, filterStateR = 0.f;
     float edgeSamples = 144.f;
+    int source = -1, sourceLength = 0;
+    std::uint64_t sourceId = 0;
+    double sourcePosition = 0., glideStart = 1., glideEnd = 1.;
+    float glideShape = .5f;
+    double waitSamples = 0.;
+    float releaseLeft = -1.f;
+
+    void stop (PhraseCapture& phrases) noexcept
+    {
+        if (source >= 0) phrases.release (source);
+        source = -1; active = false;
+    }
 
     void start (double newDelay,
                 double startRate,
@@ -161,14 +175,17 @@ struct Grain
         rate = startRate;
         duration = std::max (newDuration, 8.0f);
         rateDelta = (endRate - startRate) / static_cast<double> (duration);
+        glideStart = startRate; glideEnd = endRate; glideShape = contour;
         gain = newGain;
         pan = clamp (newPan, -1.0f, 1.0f);
         envelopePower = shapeEnvelopePower (contour);
         age = 0.0f;
+        waitSamples = 0.;
+        releaseLeft = -1.f;
         level = 0.0f; filterStateL = filterStateR = 0.f;
     }
 
-    void process (const StereoRing& ring,
+    void process (const StereoRing& ring, PhraseCapture& phrases,
                   bool captureHeadIsMoving,
                   const EngineParameters& material,
                   float& left,
@@ -176,16 +193,27 @@ struct Grain
     {
         if (! active)
             return;
+        if (releaseLeft == 0.f) { stop (phrases); return; }
+        if (waitSamples > 0.) { --waitSamples; return; }
 
         const auto phase = age / duration;
-        if (phase >= 1.0f || delay < 0.0 || delay >= static_cast<double> (ring.available() - 2))
+        if (phase >= 1.0f || (source < 0 && (delay < 0.0 || delay >= static_cast<double> (ring.available() - 2))))
         {
-            active = false;
+            stop (phrases);
             return;
         }
 
         const auto hann = std::sin (pi * clamp (phase, 0.0f, 1.0f));
         const auto stretch = clamp (material.fieldStretch, .25f, 4.f);
+        // Curve in musical pitch (log frequency), with stable interval endpoints.
+        rate = glideStart;
+        if (glideStart != glideEnd)
+        {
+            auto curve = std::pow (static_cast<double> (phase), .45 + glideShape * 2.6);
+            curve = curve * curve * (3.0 - 2.0 * curve);
+            rate = std::copysign (std::exp (std::log (std::max (.01, std::abs (glideStart))) * (1.0 - curve)
+                             + std::log (std::max (.01, std::abs (glideEnd))) * curve), glideStart);
+        }
         const auto effectiveRate = rate * std::pow (2.0, material.fieldPitch / 12.0);
         const auto offset = material.fieldPosition * std::min (static_cast<float> (ring.available()) * .35f, readSpan);
         const auto readDelay = delay + offset;
@@ -193,14 +221,30 @@ struct Grain
         const auto smoothEdge = [] (float x) { x = clamp (x, 0.f, 1.f); return x * x * (3.f - 2.f * x); };
         // Release before the read head leaves valid audio, including octave-up and held grains.
         // A short safety ramp also bounds the edge slope for very flat Shape envelopes.
-        const auto readEdge = smoothEdge (static_cast<float> (std::min (readDelay, ring.available() - 2.0 - readDelay) / edgeWidth));
+        const auto readEdge = source >= 0 ? 1.f : smoothEdge (static_cast<float> (std::min (readDelay, ring.available() - 2.0 - readDelay) / edgeWidth));
         const auto ageEdge = smoothEdge (std::min (age, duration - age) * stretch / edgeSamples);
-        const auto envelope = std::pow (std::max (hann, 0.0f), clamp (envelopePower + (material.tension - .5f) * 3.f, .2f, 6.f)) * gain * readEdge * ageEdge;
+        const auto envelope = std::pow (std::max (hann, 0.0f), clamp (envelopePower + (material.tension - .5f) * 3.f, .2f, 6.f)) * gain * readEdge * ageEdge
+            * (releaseLeft < 0.f ? 1.f : smoothEdge (releaseLeft / edgeSamples));
+        if (releaseLeft > 0.f) releaseLeft = std::max (0.f, releaseLeft - 1.f);
         const auto panAngle = (clamp (pan * (1.5f - material.cohesion), -1.f, 1.f) + 1.0f) * pi * 0.25f;
         const auto gainL = std::cos (panAngle) * 1.41421356f;
         const auto gainR = std::sin (panAngle) * 1.41421356f;
-        filterStateL += tone * (ring.read (0, delay + offset) - filterStateL);
-        filterStateR += tone * (ring.read (1, delay + offset) - filterStateR);
+        const auto read = [&] (int channel)
+        {
+            if (source < 0) return ring.read (channel, delay + offset);
+            const double seam = std::min (static_cast<double> (edgeSamples), sourceLength * .2);
+            const double cycle = std::max (2.0, sourceLength - seam);
+            const double position = wrapPosition (sourcePosition + material.fieldPosition * cycle, cycle);
+            float value = phrases.read (source, channel, position, sourceLength);
+            if (position < seam)
+            {
+                const auto blend = smoothEdge (static_cast<float> (position / seam));
+                value = lerp (phrases.read (source, channel, position + cycle, sourceLength), value, blend);
+            }
+            return value;
+        };
+        filterStateL += tone * (read (0) - filterStateL);
+        filterStateR += tone * (read (1) - filterStateR);
         const auto sampleL = filterStateL * envelope * gainL;
         const auto sampleR = filterStateR * envelope * gainR;
         left += sampleL;
@@ -209,6 +253,8 @@ struct Grain
 
         age += 1.0f / clamp (material.fieldStretch, .25f, 4.f);
         rate += rateDelta / clamp (material.fieldStretch, .25f, 4.f);
+        if (source >= 0)
+            sourcePosition = wrapPosition (sourcePosition + effectiveRate, std::max (2.0, sourceLength - std::min (static_cast<double> (edgeSamples), sourceLength * .2)));
         delay += (captureHeadIsMoving ? 1.0 : 0.0) - effectiveRate;
     }
 };
@@ -240,7 +286,7 @@ public:
         if (refractory > 0)
             --refractory;
 
-        if (refractory == 0 && fast > slow * 1.85f + 0.018f && level > 0.025f)
+        if (refractory == 0 && fast > slow * 1.65f + 0.00001f && level > 0.00008f)
         {
             refractory = static_cast<int> (sampleRate * 0.055);
             return true;
@@ -282,14 +328,14 @@ public:
         a3 = g * a2;
     }
 
-    float process (float input) noexcept
+    float process (float input, bool bandPass = false, float body = 0.f) noexcept
     {
         const auto v3 = input - ic2eq;
         const auto v1 = a1 * ic1eq + a2 * v3;
         const auto v2 = ic2eq + a2 * ic1eq + a3 * v3;
         ic1eq = 2.0f * v1 - ic1eq;
         ic2eq = 2.0f * v2 - ic2eq;
-        return v2;
+        return bandPass ? lerp (v1 * std::sqrt (k), v2, body) : v2;
     }
 
 private:
@@ -311,12 +357,15 @@ public:
         sampleRate = newSampleRate;
         ring.prepare (static_cast<int> (sampleRate * 12.0));
         holdHistory.prepare (static_cast<int> (sampleRate * 8.0));
+        for (auto& channel : resonators) for (auto& filter : channel) filter.prepare (sampleRate);
         reset();
     }
 
     void reset()
     {
         ring.clear();
+        for (auto& channel : resonators) for (auto& filter : channel) filter.reset();
+        followEnvelope = feedbackBassL = feedbackBassR = 0.f;
         holdHistory.clear();
         wasHeld = false;
         holdPosition = 0.0;
@@ -390,7 +439,7 @@ public:
                                            : ((static_cast<float> (tap) / static_cast<float> (tapCount - 1)) * 2.0f - 1.0f) * (1.5f - parameters.cohesion);
             const auto delay = baseDelay * patterns[static_cast<std::size_t> (variation)][static_cast<std::size_t> (tap)]
                                * (1.0 + modulation * (tap + 1)) * (parameters.rhythmMutation != 0 ? .5 + .25 * ((tap + parameters.rhythmMutation) % 7) : 1.0);
-            const auto weight = 1.0f / std::sqrt (static_cast<float> (tap + 1));
+            const auto weight = (tap == 0 || ((tap + variation) % 3) == 0 ? 1.f : .7f) / std::sqrt (static_cast<float> (tap + 1));
             const auto ti = static_cast<std::size_t> (tap);
             const auto semitones = parameters.fieldPitch + (parameters.pitchMutation != 0 ? static_cast<float> (((parameters.pitchMutation * 3 + tap * 2) % 5) * 3 - 6) : 0.f) + (isSmear && variation == 2 ? 12.f : 0.f);
             const auto window = sampleRate * .08;
@@ -405,6 +454,16 @@ public:
                 return ring.read (channel, tapDelay + pitchPhase * window) * weight + ring.read (channel, tapDelay + second * window) * (1.f - weight);
             };
             auto sampleL = readTap (0, delay), sampleR = readTap (1, delay * (1.0 + .003 * pan));
+            if (isSmear && (variation == 0 || variation == 1))
+            {
+                if ((sampleClock & 31u) == 0)
+                {
+                    const auto cutoff = std::min (parameters.cutoffHz, (180.f + 5500.f * std::tanh (followEnvelope * 8.f)) * (1.f + tap * .12f));
+                    for (auto& channel : resonators) channel[ti].set (cutoff, variation == 1 ? .65f : parameters.resonance * .5f);
+                }
+                sampleL = resonators[0][ti].process (sampleL, variation == 1);
+                sampleR = resonators[1][ti].process (sampleR, variation == 1);
+            }
             if (isSmear || std::abs (parameters.tension - .5f) > .001f)
             {
                 const auto sweep = .5f + .5f * std::sin (static_cast<float> (lfoPhase) * (tap + 1) + tap);
@@ -457,8 +516,16 @@ public:
         const auto cross = parameters.mode == Mode::smear ? 0.22f + 0.2f * parameters.shape : 0.08f;
         ring.write (saturate (inputL + feedback * (feedbackL * (1.0f - cross) + feedbackR * cross)),
                     saturate (inputR + feedback * (feedbackR * (1.0f - cross) + feedbackL * cross)));
-        feedbackL = outputL;
-        feedbackR = outputR;
+        // The recirculation taps stay independent of the audible rhythm/accents.
+        const auto recirculateL = ring.read (0, baseDelay) * .72f + ring.read (1, baseDelay * 1.5) * .28f;
+        const auto recirculateR = ring.read (1, baseDelay) * .72f + ring.read (0, baseDelay * 1.5) * .28f;
+        const auto highPass = static_cast<float> (1.0 - std::exp (-2.0 * pi * 65.0 / sampleRate));
+        feedbackBassL += highPass * (recirculateL - feedbackBassL);
+        feedbackBassR += highPass * (recirculateR - feedbackBassR);
+        feedbackL = recirculateL - feedbackBassL;
+        feedbackR = recirculateR - feedbackBassR;
+        const auto inputEnvelope = std::max (std::abs (inputL), std::abs (inputR));
+        followEnvelope += (inputEnvelope - followEnvelope) * static_cast<float> (1.0 - std::exp (-1.0 / (sampleRate * (inputEnvelope > followEnvelope ? .005 : .2))));
         holdHistory.write (outputL, outputR);
         ++sampleClock;
 
@@ -497,6 +564,8 @@ public:
 private:
     StereoRing ring;
     StereoRing holdHistory;
+    std::array<std::array<StateVariableLowPass, 6>, 2> resonators;
+    float followEnvelope = 0.f, feedbackBassL = 0.f, feedbackBassR = 0.f;
     std::array<double, 6> tapDelays {};
     std::array<float, 6> tapLevels {};
     std::uint64_t sampleClock = 0;
@@ -1011,6 +1080,7 @@ struct Engine::Impl
         sampleRate = clamp (newSampleRate, 8000.0, 384000.0);
         maximumBlockSize = std::max (newMaximumBlockSize, 16);
         capture.prepare (static_cast<int> (sampleRate * 12.0));
+        phrases.prepare (sampleRate);
         historySize = static_cast<int> (sampleRate * 32.0);
         for (auto& c : history) c = std::make_unique<std::atomic<float>[]> (static_cast<std::size_t> (historySize));
         historyClock.store (0);
@@ -1029,6 +1099,9 @@ struct Engine::Impl
     void reset()
     {
         capture.clear(); historyClock.store (0);
+        phrases.reset();
+        keptDelaySource = -1; keptDelayPosition = 0.; restoreFade = 0;
+        restoreFromL = restoreFromR = previousEffectL = previousEffectR = 0.f;
         fieldPitch = fieldPosition = magnetEnvelope = 0.f; fieldStretch = 1.f;
         wasTrailsBypassed = false; wasHostPlaying = false; expectedPpq = 0; previousSeed = -1;
         delay.reset();
@@ -1039,7 +1112,7 @@ struct Engine::Impl
         filterR.reset();
         reverb.reset();
         looper.reset();
-        for (auto& grain : grains) grain.active = false;
+        for (auto& grain : grains) { grain.active = false; grain.source = -1; }
         onsetAges.fill (-1.0);
         onsetCount = 0;
         spawnCountdown = 0.0;
@@ -1135,19 +1208,19 @@ struct Engine::Impl
         return 24.0 + random.nextFloat() * std::min (history, sampleRate * 0.8);
     }
 
-    std::pair<double, double> ratesFor (Mode mode, int variation, int voice) noexcept
+    std::pair<double, double> ratesFor (Mode mode, int variation, int voice, int phraseLength) noexcept
     {
         variation = clamp (variation, 0, 3);
-        const auto index = static_cast<std::size_t> ((eventStep + voice) & 3);
+        const auto index = static_cast<std::size_t> (((eventStep % std::max (1, phraseLength)) + voice) & 3);
         static constexpr std::array<double, 4> upDown { 0.5, 1.0, 2.0, 4.0 };
-        static constexpr std::array<double, 4> ladderA { 1.0, 1.259921, 1.498307, 2.0 };
-        static constexpr std::array<double, 4> ladderB { 1.0, 0.749154, 0.5, 1.33484 };
+        static constexpr std::array<double, 4> ladderA { 1.0, 2.0, 1.0, 4.0 };
+        static constexpr std::array<double, 4> ladderB { 1.0, 0.5, 1.0, 2.0 };
 
         switch (mode)
         {
             case Mode::bloom:
-                if (variation == 0) return { voice % 2 == 0 ? 1.0 : 2.0, voice % 2 == 0 ? 1.0 : 2.0 };
-                if (variation == 1) return { voice % 2 == 0 ? 1.0 : 0.5, voice % 2 == 0 ? 1.0 : 0.5 };
+                if (variation == 0) { const auto r = voice == 0 ? 1.0 : (index == 3 ? 4.0 : index == 1 ? 1.0 : 2.0); return { r, r }; }
+                if (variation == 1) { const auto r = voice == 0 ? 1.0 : (index == 1 ? 1.0 : .5); return { r, r }; }
                 if (variation == 2) return { 2.0, 2.0 };
                 return { upDown[index], upDown[index] };
             case Mode::chain:
@@ -1161,13 +1234,13 @@ struct Engine::Impl
                 return voice % 2 == 0 ? std::pair<double, double> { 0.5, 2.0 }
                                       : std::pair<double, double> { 2.0, 0.5 };
             case Mode::veil:
-                if (variation == 0) return { 0.94 + pitchRandom.nextFloat() * 0.12, 0.94 + pitchRandom.nextFloat() * 0.12 };
-                if (variation == 1) return { 0.72 + pitchRandom.nextFloat() * 0.62, 0.72 + pitchRandom.nextFloat() * 0.62 };
+                if (variation == 0) { const auto r = .998 + pitchRandom.nextFloat() * .004; return { r, r }; }
+                if (variation == 1) return { .992 + pitchRandom.nextFloat() * .016, .992 + pitchRandom.nextFloat() * .016 };
                 if (variation == 2) return { voice % 2 == 0 ? 1.0 : 2.0, voice % 2 == 0 ? 1.0 : 2.0 };
                 return { voice % 2 == 0 ? 1.0 : 0.5, voice % 2 == 0 ? 1.0 : 0.5 };
             case Mode::orbit:
                 if (variation == 1) return { 0.5, 0.5 };
-                if (variation == 3) return { 0.72, 1.35 };
+                if (variation == 3) return { 0.5, 1.0 };
                 return { 1.0, 1.0 };
             case Mode::pluck:
                 if (variation == 1) return { 0.985 + 0.01 * voice, 0.985 + 0.01 * voice };
@@ -1177,7 +1250,7 @@ struct Engine::Impl
             case Mode::breakUp:
                 if (variation == 1) return { upDown[index], upDown[index] };
                 if (variation == 3) return { upDown[(index + 1) & 3] * 0.5, upDown[(index + 1) & 3] * 0.5 };
-                return { 0.88 + pitchRandom.nextFloat() * 0.24, 0.88 + pitchRandom.nextFloat() * 0.24 };
+                return { 1.0, 1.0 };
             case Mode::ladder:
                 if (variation == 0) return { ladderA[index], ladderA[index] };
                 if (variation == 1) return { ladderB[index], ladderB[index] };
@@ -1214,9 +1287,26 @@ struct Engine::Impl
         const auto mode = parameters.mode;
         if (mode == Mode::grid)
             return;
-        if (mode == Mode::breakUp && ! onsetHit && rhythmValue (parameters) > 0.2f + parameters.density * 0.62f)
+        if (parameters.rhythmMutation != 0 && ! onsetHit)
+        {
+            static constexpr unsigned rhythms[] { 0x6du, 0xadu, 0xb5u, 0xdbu };
+            const auto mask = rhythms[hash (static_cast<unsigned> (parameters.rhythmMutation)) & 3u];
+            if ((mask & (1u << ((step + parameters.rhythmMutation) & 7))) == 0)
+            { ++sequenceStep; return; }
+        }
+        const int phraseStep = (step + parameters.rhythmMutation) & 7;
+        // Rests and pickups preserve a pulse; Activity fills the spaces rather
+        // than continuously detuning the clock interval.
+        static constexpr unsigned breaks[] { 0x93u, 0xadu, 0x6du, 0xb5u };
+        static constexpr unsigned chops[] { 0x55u, 0x6du, 0xb5u, 0xdbu };
+        const auto pattern = mode == Mode::breakUp ? breaks[clamp (parameters.variation, 0, 3)]
+                                                  : chops[clamp (parameters.variation, 0, 3)];
+        if ((mode == Mode::breakUp || mode == Mode::chop) && ! onsetHit
+            && (pattern & (1u << phraseStep)) == 0 && parameters.density < .8f)
         { ++sequenceStep; return; }
-        if (mode == Mode::pluck && onsetCount == 0)
+        if ((mode == Mode::bloom || mode == Mode::chain) && phraseStep == 7 && parameters.density < .65f && ! onsetHit)
+        { ++sequenceStep; return; }
+        if (phrases.select (0) < 0)
             return;
 
         auto voices = 1 + static_cast<int> (parameters.density * 3.99f);
@@ -1229,12 +1319,11 @@ struct Engine::Impl
         voices += static_cast<int> (parameters.fieldSplit * 4.f);
         for (int voice = 0; voice < voices; ++voice)
         {
-            const auto readDelay = chooseReadDelay (mode, grid, voice);
-            if (readDelay < 0.0)
-                continue;
+            const auto readDelay = std::max (24.0, chooseReadDelay (mode, grid, voice));
 
             pitchRandom.seed (hash (static_cast<unsigned> (parameters.seed + parameters.pitchMutation * 104729) ^ static_cast<unsigned> (step * 17 + voice + 1)));
-            auto rates = ratesFor (mode, parameters.variation, voice);
+            auto rates = ratesFor (mode, parameters.variation, voice,
+                                  mode == Mode::ladder ? 2 + static_cast<int> (parameters.density * 6.f) : 4);
             if (parameters.pitchMutation != 0)
             {
                 constexpr std::array<double,6> intervals { 1.,1.189207,1.33484,1.498307,2.,.5 };
@@ -1253,6 +1342,7 @@ struct Engine::Impl
             if (mode == Mode::slide) duration = static_cast<float> (grid * (0.75 + parameters.repeats * 1.8));
             if (mode == Mode::veil) duration = static_cast<float> (sampleRate * (0.055 + parameters.shape * 0.38 + parameters.repeats * 0.12));
             if (mode == Mode::orbit) duration = static_cast<float> (grid * (2.0 + parameters.repeats * 7.0));
+            if (mode == Mode::orbit && parameters.variation == 3) duration *= .7f + phrases.activity() * .6f;
             if (mode == Mode::pluck) duration = static_cast<float> (grid * (0.25 + parameters.repeats * 1.6));
             if (mode == Mode::chop || mode == Mode::breakUp) duration = static_cast<float> (grid * (0.18 + parameters.repeats * 0.72));
             if (mode == Mode::ladder) duration = static_cast<float> (grid * (0.38 + parameters.repeats * 0.52));
@@ -1260,19 +1350,32 @@ struct Engine::Impl
 
             duration = clamp (duration, 24.0f, static_cast<float> (sampleRate * 4.0));
             const auto gain = (mode == Mode::veil ? 0.42f : 0.66f) / std::sqrt (static_cast<float> (voices));
-            const auto pan = voices == 1 ? random.bipolar() * 0.25f
+        const auto pan = voices == 1 ? random.bipolar() * 0.25f
                                          : -0.8f + 1.6f * static_cast<float> (voice) / static_cast<float> (voices - 1);
             auto* grain = findFreeGrain();
             if (grain == nullptr) continue;
+            static constexpr std::array<int, 8> order { 0, 2, 1, 3, 0, 3, 1, 2 };
+            int selection = 0;
+            if (mode == Mode::chain) selection = order[static_cast<std::size_t> ((step + voice) & 7)];
+            else if (mode == Mode::pluck && parameters.variation >= 2) selection = step + voice;
+            else if (mode == Mode::ladder) selection = step % (2 + static_cast<int> (parameters.density * 6.f));
+            else if (mode == Mode::veil) selection = voice % 3;
+            grain->source = phrases.select (selection);
+            grain->sourceLength = phrases.length (grain->source);
+            grain->sourceId = phrases.identity (grain->source);
+            grain->sourcePosition = mode == Mode::veil ? random.nextFloat() * grain->sourceLength : 0.;
+            phrases.retain (grain->source);
             grain->edgeSamples = static_cast<float> (sampleRate * .003);
             grain->id = ++voiceSequence;
             grain->start (readDelay + voice * 7.0,
                                     rates.first,
                                     rates.second,
                                     duration,
-                                    gain,
+                                    gain * (phraseStep == 0 ? 1.f : phraseStep == 4 ? .9f : .76f),
                                     pan + random.bipolar() * 0.12f,
                                     parameters.shape);
+            if (mode == Mode::bloom || mode == Mode::chain || mode == Mode::pluck)
+                grain->waitSamples = voice * grid * (parameters.variation == 2 ? .333333333 : .25);
             grain->readSpan = static_cast<float> (sampleRate * 2.0);
             grain->tone = 1.f;
             if ((mode == Mode::chain && parameters.variation == 0) || (mode == Mode::ladder && parameters.variation == 2))
@@ -1287,16 +1390,16 @@ struct Engine::Impl
     {
         switch (parameters.mode)
         {
-            case Mode::bloom: return grid / (1.0 + parameters.density * 2.6);
+            case Mode::bloom: return grid;
             case Mode::chain: return grid;
-            case Mode::slide: return grid * (0.65 - parameters.density * 0.25);
+            case Mode::slide: return grid;
             case Mode::veil: return sampleRate * (0.115 - parameters.density * 0.095);
-            case Mode::orbit: return grid * (1.5 - parameters.density * 0.8);
-            case Mode::pluck: return grid * (1.0 - parameters.density * 0.55);
-            case Mode::chop: return grid * (0.75 - parameters.density * 0.4);
-            case Mode::breakUp: return grid * (1.4 - parameters.density * 0.8);
-            case Mode::ladder: return grid * (0.7 - parameters.density * 0.35);
-            case Mode::smear: return grid * (0.75 - parameters.density * 0.4);
+            case Mode::orbit: return grid * 2.;
+            case Mode::pluck: return grid;
+            case Mode::chop: return grid * .5;
+            case Mode::breakUp: return grid;
+            case Mode::ladder: return grid * .5;
+            case Mode::smear: return grid;
             case Mode::grid: return grid;
             case Mode::count: return grid;
             default: return grid;
@@ -1305,6 +1408,17 @@ struct Engine::Impl
 
     void renderEffect (const EngineParameters& parameters, int samples, int channels)
     {
+        if (phrases.beginBlock())
+        {
+            for (auto& grain : grains) { grain.active = false; grain.source = -1; }
+            keptDelaySource = -1; keptDelayPosition = 0.;
+            restoreFade = static_cast<int> (sampleRate * .005);
+            restoreFromL = previousEffectL; restoreFromR = previousEffectR;
+        }
+        // Grid has no grain output. Release its predecessors' source references
+        // so a long stay in delay mode cannot exhaust the capture bank.
+        if (parameters.mode == Mode::grid)
+            for (auto& grain : grains) if (grain.active) grain.stop (phrases);
         const auto bpm = clamp (parameters.bpm, 30.0, 300.0);
         const auto quarter = sampleRate * 60.0 / bpm;
         const auto grid = clamp (quarter * divisionFactor (parameters.division), 32.0, sampleRate * 4.0);
@@ -1317,7 +1431,11 @@ struct Engine::Impl
                 const auto timeline = parameters.hostPpq * quarter;
                 spawnCountdown = std::fmod (interval - std::fmod (timeline, interval), interval);
                 sequenceStep = std::max (0, static_cast<int> (std::floor (timeline / interval)));
-                for (auto& grain : grains) grain.active = false;
+                for (auto& grain : grains) if (grain.active)
+                {
+                    if (grain.waitSamples > 0.) grain.stop (phrases);
+                    else grain.releaseLeft = grain.edgeSamples;
+                }
             }
             expectedPpq = parameters.hostPpq + samples / quarter;
         }
@@ -1355,6 +1473,7 @@ struct Engine::Impl
                     if (age >= 0.0) age += 1.0;
 
             const auto onsetHit = ! parameters.freeze && onset.process (inputL, inputR);
+            const bool freshPhrase = phrases.process (inputL, inputR, onsetHit, parameters.freeze || parameters.patternLock);
             if (onsetHit)
                 rememberOnset();
 
@@ -1367,6 +1486,7 @@ struct Engine::Impl
 
             spawnCountdown -= 1.0;
             auto shouldSpawn = spawnCountdown <= 0.0;
+            if (freshPhrase && ! parameters.patternLock) shouldSpawn = true;
             if (! parameters.patternLock && onsetHit && (parameters.mode == Mode::pluck
                              || parameters.mode == Mode::chop
                              || parameters.mode == Mode::breakUp
@@ -1376,8 +1496,11 @@ struct Engine::Impl
             if (parameters.magnetMode == 1 && previousMagnet < .08f && magnetEnvelope >= .08f && parameters.magnetAmount > 0.f) shouldSpawn = true;
             if (shouldSpawn && ! parameters.looperOnly && ! (parameters.bypass && parameters.trails))
             {
-                spawnEvent (parameters, grid, onsetHit);
-                spawnCountdown = std::max (intervalFor (parameters, grid) * (parameters.rhythmMutation != 0 ? .5 + rhythmValue (parameters) : 1.0), 12.0);
+                spawnEvent (parameters, grid, onsetHit && ! parameters.patternLock);
+                const auto interval = intervalFor (parameters, grid);
+                spawnCountdown = parameters.hostPositionValid && parameters.hostPlaying
+                    ? std::max (12., interval - std::fmod (parameters.hostPpq * quarter + sample, interval))
+                    : std::max (interval, 12.);
             }
 
             float effectL = 0.0f;
@@ -1385,7 +1508,31 @@ struct Engine::Impl
             auto active = 0;
 
             if (parameters.mode == Mode::grid || parameters.mode == Mode::smear)
-                delay.process (inputL, inputR, material, effectL, effectR);
+            {
+                auto feedL = inputL, feedR = inputR;
+                if (parameters.patternLock && phrases.isLocked())
+                {
+                    if (keptDelaySource < 0) { keptDelaySource = phrases.select (0); keptDelayPosition = 0.; }
+                    if (keptDelaySource >= 0)
+                    {
+                        const auto n = phrases.length (keptDelaySource);
+                        const auto seam = std::min (sampleRate * .005, n * .2), cycle = n - seam;
+                        for (int c = 0; c < 2; ++c)
+                        {
+                            float value = phrases.read (keptDelaySource,c,keptDelayPosition,n);
+                            if (keptDelayPosition < seam)
+                            {
+                                const auto blend = static_cast<float> (keptDelayPosition / seam);
+                                value = lerp (phrases.read (keptDelaySource,c,keptDelayPosition+cycle,n),value,blend*blend*(3.f-2.f*blend));
+                            }
+                            (c == 0 ? feedL : feedR) = value;
+                        }
+                        keptDelayPosition = wrapPosition (keptDelayPosition + 1., cycle);
+                    }
+                }
+                else keptDelaySource = -1;
+                delay.process (feedL, feedR, material, effectL, effectR);
+            }
 
             if (parameters.mode != Mode::grid)
             {
@@ -1393,13 +1540,19 @@ struct Engine::Impl
                 float grainR = 0.0f;
                 for (auto& grain : grains)
                 {
-                    grain.process (capture, ! parameters.freeze, material, grainL, grainR);
+                    grain.process (capture, phrases, ! parameters.freeze, material, grainL, grainR);
                     if (grain.active)
                         ++active;
                 }
                 const auto targetNormalizer = active > 0 ? 1.0f / std::sqrt (1.0f + 0.12f * static_cast<float> (active)) : 1.0f;
                 grainNormalizer += (1.f - std::exp (-1.f / static_cast<float> (sampleRate * .003))) * (targetNormalizer - grainNormalizer);
                 const auto normalizer = grainNormalizer;
+                const auto response = phrases.responseGain (parameters.repeats, quarter);
+                grainL *= response; grainR *= response;
+                if (parameters.mode == Mode::bloom || parameters.mode == Mode::chain || parameters.mode == Mode::slide)
+                {
+                    grainL *= phrases.participation(); grainR *= phrases.participation();
+                }
                 if (parameters.mode == Mode::smear)
                 {
                     effectL = effectL * 0.68f + grainL * 0.62f * normalizer;
@@ -1430,18 +1583,27 @@ struct Engine::Impl
             auto targetCutoff = parameters.cutoffHz;
             if (parameters.mode == Mode::orbit && (parameters.variation == 1 || parameters.variation == 3))
                 targetCutoff *= .25f + .75f * (.5f + .5f * std::sin (static_cast<float> (sampleClock + sample) / static_cast<float> (quarter) * pi));
+            const bool resonantOrbit = parameters.mode == Mode::orbit && parameters.variation == 2;
+            if (resonantOrbit) targetCutoff = std::min (targetCutoff, 260.f + 1700.f * phrases.activity());
             smoothedCutoff += 0.0015f * (targetCutoff - smoothedCutoff);
-            filterL.set (smoothedCutoff, parameters.resonance);
-            filterR.set (smoothedCutoff, parameters.resonance);
-            effectL = filterL.process (effectL);
-            effectR = filterR.process (effectR);
+            filterL.set (smoothedCutoff, resonantOrbit ? .55f + parameters.resonance * .3f : parameters.resonance);
+            filterR.set (smoothedCutoff, resonantOrbit ? .55f + parameters.resonance * .3f : parameters.resonance);
+            effectL = filterL.process (effectL, resonantOrbit, .5f);
+            effectR = filterR.process (effectR, resonantOrbit, .5f);
 
             float reverbL = 0.0f;
             float reverbR = 0.0f;
-            reverb.process (effectL, effectR, parameters.space, parameters.reverbStyle, reverbL, reverbR);
+            reverb.process (effectL, effectR, parameters.space, parameters.reverbStyle, smoothedCutoff, reverbL, reverbR);
             const auto dryEffect = 1.0f - parameters.space * 0.3f;
             effectL = effectL * dryEffect + reverbL * parameters.space * 1.18f;
             effectR = effectR * dryEffect + reverbR * parameters.space * 1.18f;
+            if (restoreFade > 0)
+            {
+                auto blend = 1.f - static_cast<float> (restoreFade--) / static_cast<float> (sampleRate * .005);
+                blend = blend * blend * (3.f - 2.f * blend);
+                effectL = lerp (restoreFromL, effectL, blend); effectR = lerp (restoreFromR, effectR, blend);
+            }
+            previousEffectL = effectL; previousEffectR = effectR;
 
             feedbackL = saturate (effectL * 0.82f);
             feedbackR = saturate (effectR * 0.82f);
@@ -1652,6 +1814,7 @@ struct Engine::Impl
         frame.magnet = std::tanh (magnetEnvelope * 5.f) * parameters.magnetAmount;
         frame.fieldPosition = fieldPosition; frame.fieldPitch = fieldPitch; frame.fieldStretch = fieldStretch; frame.fieldSplit = parameters.fieldSplit;
         frame.held = parameters.freeze;
+        frame.phraseKept = parameters.patternLock && phrases.isLocked();
         frame.reverse = parameters.reverse;
         frame.bypass = parameters.bypass;
         frame.inputLevel = inputLevel.load (std::memory_order_relaxed);
@@ -1672,18 +1835,21 @@ struct Engine::Impl
                 if (! grain.active || grain.level < 0.00005f) continue;
                 auto& voice = frame.voices[static_cast<std::size_t> (frame.voiceCount++)];
                 voice.id = grain.id;
+                voice.sourceId = grain.sourceId;
                 voice.phase = grain.age / grain.duration;
                 voice.duration = grain.duration / static_cast<float> (sampleRate);
                 voice.rate = static_cast<float> (grain.rate * std::pow (2., fieldPitch / 12.));
                 voice.pan = grain.pan;
                 voice.envelope = std::pow (std::max (0.0f, std::sin (pi * voice.phase)), clamp (grain.envelopePower + (parameters.tension - .5f) * 3.f, .2f, 6.f));
                 voice.envelopePower = clamp (grain.envelopePower + (parameters.tension - .5f) * 3.f, .2f, 6.f);
-                voice.level = grain.level;
+                voice.level = grain.level * phrases.responseGain (parameters.repeats, sampleRate * 60. / clamp (parameters.bpm, 30., 300.));
                 for (std::size_t point = 0; point < voice.waveform.size(); ++point)
                 {
                     const auto offset = (static_cast<double> (point) / static_cast<double> (voice.waveform.size() - 1) - 0.5)
                                         * std::min (static_cast<double> (grain.duration), sampleRate * 0.06);
-                    voice.waveform[point] = capture.read (0, grain.delay - offset * grain.rate);
+                    voice.waveform[point] = grain.source >= 0
+                        ? phrases.read (grain.source, 0, wrapPosition (grain.sourcePosition + offset * grain.rate, static_cast<double> (grain.sourceLength)), grain.sourceLength)
+                        : capture.read (0, grain.delay - offset * grain.rate);
                 }
             }
         if (parameters.mode == Mode::grid || parameters.mode == Mode::smear)
@@ -1715,10 +1881,15 @@ struct Engine::Impl
     bool wasTrailsBypassed = false;
     bool wasHostPlaying = false; double expectedPpq = 0;
     StereoRing capture;
+    PhraseCapture phrases;
+    int keptDelaySource = -1;
+    double keptDelayPosition = 0.;
+    int restoreFade = 0;
+    float restoreFromL = 0.f, restoreFromR = 0.f, previousEffectL = 0.f, previousEffectR = 0.f;
     MultiTapDelay delay;
     ModulatedDelay modulation;
     ReverseCloud reverseCloud;
-    StereoReverb reverb;
+    DiffuseSpace reverb;
     StateVariableLowPass filterL;
     StateVariableLowPass filterR;
     OnsetDetector onset;
@@ -1794,6 +1965,8 @@ AudioSnapshot Engine::snapshotHistory (double seconds)
     return snapshot;
 }
 AudioSnapshot Engine::snapshotLoop() { return impl->looper.snapshot(); }
+PhraseSnapshot Engine::snapshotPhrase() { return impl->phrases.snapshot(); }
+bool Engine::restorePhrase (const PhraseSnapshot& snapshot) { return impl->phrases.restore (snapshot); }
 bool Engine::restoreLoop (const AudioSnapshot& audio) { return impl->looper.restore (audio); }
 
 void Engine::requestLooperCommand (LooperCommand command) noexcept

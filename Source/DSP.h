@@ -108,6 +108,7 @@ inline float shapeEnvelopePower (float shape) noexcept
 struct VisualVoice
 {
     std::uint64_t id = 0;
+    std::uint64_t sourceId = 0;
     float phase = 0.0f, duration = 0.0f, rate = 1.0f, pan = 0.0f;
     float envelope = 0.0f, level = 0.0f;
     float envelopePower = 1.0f;
@@ -135,6 +136,7 @@ struct VisualFrame
     float loopSeconds = 0.0f, loopProgress = 0.0f;
     LooperState loopState = LooperState::empty;
     bool held = false, reverse = false, bypass = false, canUndo = false;
+    bool phraseKept = false;
     std::array<VisualVoice, 54> voices {};
     std::array<float, 512> loopWaveform {};
     // Chronological min/max bins of the final stereo output (~320 ms).
@@ -145,6 +147,14 @@ struct AudioSnapshot
 {
     double sampleRate = 44100.0;
     bool playing = false;
+    std::array<std::vector<float>, 2> audio;
+};
+
+struct PhraseSnapshot
+{
+    double sampleRate = 44100.;
+    std::array<int, 12> lengths {};
+    std::array<std::uint64_t, 12> identities {};
     std::array<std::vector<float>, 2> audio;
 };
 
@@ -168,6 +178,8 @@ public:
 
     // File conversion and snapshot allocation happen on the caller, never in process().
     AudioSnapshot snapshotLoop();
+    PhraseSnapshot snapshotPhrase();
+    bool restorePhrase (const PhraseSnapshot&);
     bool restoreLoop (const AudioSnapshot&);
     AudioSnapshot snapshotHistory (double seconds);
     void requestLooperCommand (LooperCommand command) noexcept;
