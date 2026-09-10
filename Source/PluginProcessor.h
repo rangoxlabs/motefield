@@ -55,10 +55,10 @@ public:
     bool isMidiEffect() const override { return false; }
     double getTailLengthSeconds() const override { return 24.0; }
 
-    int getNumPrograms() override { return 32; }
+    int getNumPrograms() override { return 37; }
     int getCurrentProgram() override { return currentProgram.load(); }
     void setCurrentProgram (int index) override;
-    const juce::String getProgramName (int index) override { return factoryPresetNames()[juce::jlimit (0,31,index)]; }
+    const juce::String getProgramName (int index) override { return factoryPresetNames()[juce::jlimit (0,36,index)]; }
     void changeProgramName (int, const juce::String&) override {}
 
     void getStateInformation (juce::MemoryBlock& destinationData) override;

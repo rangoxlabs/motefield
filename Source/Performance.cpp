@@ -60,7 +60,7 @@ bool decode (const juce::MemoryBlock& bytes, motefield::AudioSnapshot& snapshot)
 
 const std::vector<juce::String>& MoteFieldAudioProcessor::extendedParameterIds()
 {
-    static const auto ids = [] { std::vector<juce::String> result; for (const auto& c : controls) result.emplace_back (c.id); for (const auto* id : { "width", "wetSolo", "levelMatch" }) result.emplace_back (id); return result; }();
+    static const auto ids = [] { std::vector<juce::String> result; for (const auto& c : controls) result.emplace_back (c.id); for (const auto* id : { "width", "wetSolo", "levelMatch", "tuningReference", "loopRecordStart", "loopCountIn", "loopLength" }) result.emplace_back (id); return result; }();
     return ids;
 }
 void MoteFieldAudioProcessor::addPerformanceParameters (juce::AudioProcessorValueTreeState::ParameterLayout& layout)
@@ -114,7 +114,7 @@ juce::Result MoteFieldAudioProcessor::captureHistory (int bars)
     if (snapshot.audio[0].empty()) return juce::Result::fail ("Play some audio before capturing history.");
     return engine.restoreLoop (snapshot) ? juce::Result::ok() : juce::Result::fail ("The previous capture is still loading. Try again after playback resumes.");
 }
-void MoteFieldAudioProcessor::setCurrentProgram (int index) { requestedProgram.store (juce::jlimit (0,31,index)); }
+void MoteFieldAudioProcessor::setCurrentProgram (int index) { requestedProgram.store (juce::jlimit (0,36,index)); }
 void MoteFieldAudioProcessor::timerCallback()
 {
     const auto index = requestedProgram.exchange (-1);

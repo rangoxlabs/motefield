@@ -3,6 +3,7 @@
 #include "PluginProcessor.h"
 #include "PerformancePanel.h"
 #include "Appearance.h"
+#include "TuningPanel.h"
 
 class MoteFieldLookAndFeel final : public juce::LookAndFeel_V4
 {
@@ -49,6 +50,7 @@ public:
     void mouseUp (const juce::MouseEvent&) override;
     void mouseDoubleClick (const juce::MouseEvent&) override;
     juce::String getTooltip() override { return "Drag liquid to scan / transpose. Shift-drag stretches. Alt-drag splits voices. Double-click resets."; }
+    void setEnvelopeVisible (bool show) { envelopeVisible = show; repaint(); }
     void invalidateMaterial() { materialRendered = false; }
     void setShape (float value) { shape = value; }
     void setSampleRate (double value) { sampleRate = value > 0.0 ? value : 48000.0; }
@@ -79,7 +81,7 @@ private:
     juce::Image liquidImage { juce::Image::ARGB, liquidWidth, liquidHeight, true };
     double sampleRate = 48000.0;
     motefield::VisualFrame frame;
-    bool reducedMotion = false, materialRendered = false, materialActive = false;
+    bool envelopeVisible = true, reducedMotion = false, materialRendered = false, materialActive = false;
     float shape = .52f, outputDrive = 0.0f;
 };
 
@@ -101,6 +103,7 @@ public:
     void resized() override;
     void refreshDisplay();
     void applyAppearance();
+    void mouseDown (const juce::MouseEvent&) override;
 private:
     using SliderAttachment = juce::AudioProcessorValueTreeState::SliderAttachment;
     using ButtonAttachment = juce::AudioProcessorValueTreeState::ButtonAttachment;
@@ -143,6 +146,7 @@ private:
     std::unique_ptr<SliderAttachment> timeAttachment;
     juce::TextButton reverseButton, syncButton, tapButton, holdButton, bypassButton, wetSoloButton, levelMatchButton;
     juce::Label matchStatus;
+    std::unique_ptr<TuningPanel> tuningPanel;
     juce::TextButton recordButton, playButton, dubButton, stopButton, undoButton, eraseButton;
     juce::TextButton preButton, postButton, loopReverseButton, detailsButton, motionButton;
     juce::TextButton previousPreset, nextPreset, savePresetButton, randomPresetButton, performanceButton;

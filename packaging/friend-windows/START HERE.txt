@@ -1,4 +1,4 @@
-MOTEFIELD 0.3.6 / RANGO LABS / WINDOWS TEST ZIP
+MOTEFIELD 0.3.7 / RANGO LABS / WINDOWS TEST ZIP
 
 For Windows 10/11, Intel/AMD x64, and a 64-bit VST3-compatible DAW.
 This is the Windows build. The Mac ZIP cannot run on Windows.
@@ -44,6 +44,13 @@ INCLUDED SINCE 0.3.4
 Stereo Width, Wet Solo, Level Match, more responsive reactor motion, and
 preset arrows directly beside the preset box. All three new controls automate.
 
-FIXED IN 0.3.6
+FIXED IN 0.3.5
 Gentler widening above 100%, capped at 10% extra side gain. POST loops now
 record their width and keep it during playback/export. PRE routing is unchanged.
+
+NEW IN 0.3.7
+Tuning recalls with presets. TRANSPOSE opens an in-place page with interval,
+fine cents and A4 reference. Five new tuned presets bring the factory bank to 37;
+all use A4 440 Hz. PERFORM adds recording start, one-bar count-in and fixed
+1/2/4/8-bar length (60-second maximum). Armed recording can be cancelled with
+REC or STOP. Existing sessions/presets remain readable. All 65 parameters automate.

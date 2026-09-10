@@ -634,10 +634,57 @@ void testWidthPrintAndMonoCompatibility()
     std::cout<<"Width print: bounded side gain, positive test correlation "<<correlation<<", mono sum, POST capture/playback/export consistency and PRE routing passed.\n";
 }
 
+void testScheduledRecording()
+{
+    constexpr double rate = 8000;
+    motefield::Engine e; e.prepare(rate,64,2);
+    motefield::EngineParameters p; p.bpm=120; p.mix=0; p.hostPositionValid=true; p.hostPlaying=true;
+    p.recordStart=3; p.recordCountIn=true; p.recordBars=4; p.beatsPerBar=4; p.hostPpq=1.5;
+    float in[64], left[64], right[64]; std::fill_n(in,64,.1f);
+    const float* inputs[]{in,in}; float* outputs[]{left,right};
+    double beat=1.5;
+    const auto tick=[&](int count) {
+        while(count>0) {const auto n=std::min(count,64);p.hostPpq=beat;p.hostBarStart=std::floor(beat/p.beatsPerBar)*p.beatsPerBar;
+            watchingAudioAllocations=true;e.process(inputs,outputs,2,n,p);watchingAudioAllocations=false;
+            beat+=n*p.bpm/(rate*60.);count-=n;}
+    };
+    e.requestLooperCommand(motefield::LooperCommand::record);
+    tick(26000); // 1.5 -> 8 beats: next bar at 4, plus four-beat count-in.
+    require(e.getLooperState()==motefield::LooperState::empty,"recording began before count-in completed");
+    tick(1);require(e.getLooperState()==motefield::LooperState::recording,"recording missed target bar");
+    tick(63999);require(e.getLooperState()==motefield::LooperState::playing,"fixed recording did not finish into playback");
+    require(e.snapshotLoop().audio[0].size()==64000,"four-bar recording length is not sample exact");
+    e.reset(); beat=0; p.hostPlaying=false;p.recordCountIn=false;
+    e.requestLooperCommand(motefield::LooperCommand::record); tick(32000);
+    require(e.getLooperState()==motefield::LooperState::empty,"armed recording started while host stopped");
+    p.hostPlaying=true;beat=0;tick(16000);require(e.getLooperState()==motefield::LooperState::empty,"host restart did not rebase arming");
+    tick(1);require(e.getLooperState()==motefield::LooperState::recording,"host restart did not start at next bar");
+    for(const double meter : {3.,1.,.5})
+    {
+        e.reset();p.beatsPerBar=meter;p.recordCountIn=false;p.recordBars=1;beat=.25;
+        e.requestLooperCommand(motefield::LooperCommand::record);
+        tick(static_cast<int>((meter-.25)*4000));require(e.getLooperState()==motefield::LooperState::empty,"non-4/4 bar started early");
+        tick(static_cast<int>(meter*4000));require(e.getLooperState()==motefield::LooperState::playing,"non-4/4 bar did not finish");
+        require(e.snapshotLoop().audio[0].size()==static_cast<size_t>(meter*4000),"non-4/4 captured incorrect duration");
+    }
+    e.reset();p.beatsPerBar=4;beat=.25;e.requestLooperCommand(motefield::LooperCommand::record);tick(1);
+    e.requestLooperCommand(motefield::LooperCommand::stop);tick(20000);
+    require(e.getLooperState()==motefield::LooperState::empty,"Stop did not cancel armed recording");
+    e.reset();p.recordStart=1;p.recordBars=1;p.recordIntoDub=true;beat=0;
+    e.requestLooperCommand(motefield::LooperCommand::record);tick(8000);p.bpm=60;tick(16000);
+    require(e.getLooperState()==motefield::LooperState::overdubbing && e.snapshotLoop().audio[0].size()==24000,"tempo change broke bar length or overdub finish");
+    e.reset();p.bpm=120;p.recordStart=0;p.quantize=true;p.recordBars=0;beat=.25;
+    e.requestLooperCommand(motefield::LooperCommand::record);tick(3000);require(e.getLooperState()==motefield::LooperState::empty,"legacy quantize started early");
+    tick(1);require(e.getLooperState()==motefield::LooperState::recording,"legacy next-beat quantize changed");
+    require(audioAllocations==0,"scheduled recording allocated on audio thread");
+    std::cout<<"Recording timing passed: exact four-bar count-in capture, host stopped/restart, 3/4, 1/4, 1/8, cancel, tempo change, overdub and legacy beat quantize.\n";
+}
+
 } // namespace
 
 int main (int argc, char**)
 {
+    testScheduledRecording();
     testWidthPrintAndMonoCompatibility();
     testOutputMonitoring();
     testPerformanceFeatures();

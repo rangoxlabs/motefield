@@ -82,6 +82,9 @@ struct EngineParameters
     float loopFade = 0.0f;
     int fadeMode = 0;
     bool recordIntoDub = false;
+    int recordStart = 0, recordBars = 0;
+    bool recordCountIn = false;
+    double beatsPerBar = 4.0, hostBarStart = 0.0;
     double hostPpq = 0.0;
     bool hostPositionValid = false, hostPlaying = false;
     float viscosity = 0.25f, cohesion = 0.5f, tension = 0.5f;
@@ -126,7 +129,9 @@ struct VisualFrame
     std::array<float, 3> spectralEnergy {};
     float viscosity = .25f, cohesion = .5f, tension = .5f, magnet = 0.f;
     float fieldPosition = 0.f, fieldPitch = 0.f, fieldStretch = 1.f, fieldSplit = 0.f;
-    bool loopPending = false;
+    bool loopPending = false, loopWaiting = false;
+    float loopCountdown = 0.f;
+    int recordingBar = 0, recordingBars = 0;
     float loopSeconds = 0.0f, loopProgress = 0.0f;
     LooperState loopState = LooperState::empty;
     bool held = false, reverse = false, bypass = false, canUndo = false;

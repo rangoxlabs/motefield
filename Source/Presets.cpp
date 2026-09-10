@@ -61,7 +61,7 @@ void MoteFieldAudioProcessor::initializeSound()
         "viscosity", "cohesion", "tension", "fieldPosition", "fieldPitch", "fieldStretch",
         "fieldSplit", "magnetAmount", "magnetMode", "magnetAttack", "magnetRelease",
         "patternSeed", "patternLock", "patternSteps", "rhythmMutation", "pitchMutation",
-        "scale", "scaleRoot", "sourceNote" };
+        "scale", "scaleRoot", "sourceNote", "tuningReference" };
     const int selectedMode = juce::jlimit (0, 10, juce::roundToInt (parameters.getRawParameterValue (mode)->load()));
     struct StartingSound { float activity, repeat, contour; };
     static constexpr std::array<StartingSound, 11> starts {{
@@ -208,7 +208,7 @@ juce::Result MoteFieldAudioProcessor::loadUserPreset (const juce::File& file)
         if (const auto* ranged = dynamic_cast<const juce::RangedAudioParameter*> (parameter))
             if (isPresetParameter (ranged->paramID) && seen.count (ranged->paramID) == 0)
             {
-                if (ranged->paramID == "width" || (document->getIntAttribute ("version") == 1 && std::find (extendedParameterIds().begin(), extendedParameterIds().end(), ranged->paramID) != extendedParameterIds().end()))
+                if ((ranged->paramID == "width" || ranged->paramID == "tuningReference" || ranged->paramID == "loopRecordStart" || ranged->paramID == "loopCountIn" || ranged->paramID == "loopLength") || (document->getIntAttribute ("version") == 1 && std::find (extendedParameterIds().begin(), extendedParameterIds().end(), ranged->paramID) != extendedParameterIds().end()))
                     values.emplace_back (parameters.getParameter (ranged->paramID), ranged->getDefaultValue());
                 else return juce::Result::fail ("This preset is incomplete. Your sound has not changed.");
             }

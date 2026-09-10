@@ -777,7 +777,7 @@ public:
         position = 0; recordPosition = 0; generation = 1; canUndo = false;
         state.store (static_cast<int> (LooperState::empty)); progress.store (0);
         commandRead.store (0); commandWrite.store (0); pendingCommand = LooperCommand::none;
-        pending.store (false); internalBeat = 0; fadeGain = 0; lastBeat = -1; speedSmooth = 1;
+        pending.store (false); recordBeats = recordGoal = countdown = 0; waiting = false; internalBeat = 0; fadeGain = 0; lastBeat = -1; speedSmooth = 1;
     }
     void beginBlock() noexcept
     {
@@ -789,6 +789,7 @@ public:
             const auto& storage = *slots[next];
             state.store (static_cast<int> (storage.length.load() > 1 ? (storage.resume ? LooperState::playing : LooperState::stopped) : LooperState::empty));
             pendingCommand = LooperCommand::none; pending.store (false); progress.store (0);
+            recordBeats = recordGoal = countdown = 0; waiting = false;
             pendingSlot.store (-1, std::memory_order_release);
         }
     }
@@ -841,6 +842,9 @@ public:
     {
         const auto& data = *slots[active.load()]; const auto length = data.length.load();
         frame.loopState = currentState(); frame.loopSeconds = static_cast<float> (length / sampleRate);
+        frame.loopCountdown = countdown; frame.loopWaiting = waiting;
+        frame.recordingBars = recordGoal > 0 ? static_cast<int> (std::llround (recordGoal / recordBarSize)) : 0;
+        frame.recordingBar = currentState() == LooperState::recording ? 1 + static_cast<int> (recordBeats / recordBarSize) : 0;
         frame.loopProgress = currentProgress(); frame.canUndo = canUndo; frame.loopPending = pending.load();
         if (length < 2) return;
         for (std::size_t bin = 0; bin < frame.loopWaveform.size(); ++bin)
@@ -861,12 +865,31 @@ public:
         {
             const auto cmd = commands[read]; commandRead.store ((read + 1) % commands.size(), std::memory_order_release);
             const auto immediate = cmd == LooperCommand::clear || cmd == LooperCommand::undo || cmd == LooperCommand::burstStart || cmd == LooperCommand::burstEnd;
-            if (p.quantize && ! immediate) { pendingCommand = cmd; targetBeat = std::ceil (beat - 1.e-7); pending.store (true); }
+            const bool startsRecording = currentState() == LooperState::empty && (cmd == LooperCommand::record || cmd == LooperCommand::recordPlayDub);
+            if (pending.load() && (cmd == LooperCommand::stop || cmd == LooperCommand::stopPlay || startsRecording))
+            { pending.store (false); pendingCommand = LooperCommand::none; }
+            else if (startsRecording && ! immediate)
+            {
+                const int start = p.recordStart == 0 ? (p.quantize ? 2 : 1) : p.recordStart;
+                pendingBar = start == 3;
+                pendingGrid = pendingBar ? std::max (.25, p.beatsPerBar) : start == 2 ? 1.0 : 0.0;
+                pendingCountIn = p.recordCountIn ? std::max (.25, p.beatsPerBar) : 0.0;
+                targetBeat = startTarget (beat, p) + pendingCountIn;
+                pendingCommand = cmd;
+                pending.store (targetBeat > beat + 1.e-7 || (p.hostPositionValid && ! p.hostPlaying && (start > 1 || p.recordCountIn)));
+                if (! pending.load()) execute (cmd, p, beat);
+            }
+            else if (p.quantize && ! immediate)
+            { pendingCommand = cmd; pendingBar = false; pendingGrid = 1.0; pendingCountIn = 0; targetBeat = std::ceil (beat - 1.e-7); pending.store (true); }
             else { if (cmd != LooperCommand::undo) pending.store (false); execute (cmd, p, beat); }
         }
-        // Rebase an armed command after a host seek so it never waits for an obsolete timeline position.
-        if (lastBeat >= 0 && std::abs (beat - lastBeat - 1.0 / quarter) > .05 && pending.load()) targetBeat = std::ceil (beat - 1.e-7);
-        if (pending.load() && beat + 1.e-7 >= targetBeat) { execute (pendingCommand, p, beat); pending.store (false); }
+        const auto wasWaiting = waiting;
+        waiting = pending.load() && p.hostPositionValid && ! p.hostPlaying;
+        // Host seeks re-arm against the new timeline; a full count-in is retained.
+        if (pending.load() && ((wasWaiting && ! waiting) || (lastBeat >= 0 && std::abs (beat - lastBeat - 1.0 / quarter) > .05)))
+            targetBeat = startTarget (beat, p) + pendingCountIn;
+        if (pending.load() && ! waiting && beat + 1.e-7 >= targetBeat) { execute (pendingCommand, p, beat); pending.store (false); }
+        countdown = pending.load() ? static_cast<float> (std::max (0.0, targetBeat - beat)) : 0.f;
         auto st = currentState();
         outL = liveL; outR = liveR;
         if (st == LooperState::recording)
@@ -877,9 +900,10 @@ public:
                 data.base[0][recordPosition].store (liveL); data.base[1][recordPosition].store (liveR);
                 data.stamps[recordPosition].store ((tag + 0x20000u) & ~std::uint64_t (65535), std::memory_order_release);
                 ++recordPosition; data.length.store (recordPosition, std::memory_order_release);
-                progress.store (static_cast<float> (recordPosition) / data.capacity);
+                progress.store (recordGoal > 0 ? static_cast<float> ((recordBeats + 1.0 / quarter) / recordGoal) : static_cast<float> (recordPosition) / data.capacity);
             }
-            if (recordPosition >= data.capacity) finish (false, p);
+            recordBeats += 1.0 / quarter;
+            if (recordPosition >= data.capacity || (recordGoal > 0 && recordBeats + 1.e-7 >= recordGoal)) finish (false, p);
         }
         else if ((st == LooperState::playing || st == LooperState::overdubbing || stopping) && data.length.load() > 1)
         {
@@ -928,6 +952,13 @@ public:
         lastBeat = beat;
     }
 private:
+    double startTarget (double beat, const EngineParameters& p) const noexcept
+    {
+        if (pendingGrid <= 0) return beat;
+        const auto anchor = pendingBar && p.hostPositionValid && p.hostPlaying ? p.hostBarStart : 0.0;
+        if (pendingBar) return anchor + (std::floor ((beat - anchor) / pendingGrid + 1.e-7) + 1.0) * pendingGrid;
+        return std::ceil (beat - 1.e-7);
+    }
     void finish (bool stop, const EngineParameters& p) noexcept
     {
         auto& data = *slots[active.load()];
@@ -939,6 +970,7 @@ private:
     void execute (LooperCommand cmd, const EngineParameters& p, double beat) noexcept
     {
         auto& data = *slots[active.load()]; auto st = currentState();
+        const bool burst = cmd == LooperCommand::burstStart;
         if (cmd == LooperCommand::clear) { data.length.store (0); state.store (static_cast<int> (LooperState::empty)); canUndo = false; stopping = false; pending.store (false); progress.store (0); return; }
         if (cmd == LooperCommand::undo) { if (canUndo) { data.layers[generation].store (false); canUndo = false; if (st == LooperState::overdubbing) state.store (static_cast<int> (LooperState::playing)); } return; }
         if (cmd == LooperCommand::burstStart) { data.length.store (0); st = LooperState::empty; cmd = LooperCommand::record; }
@@ -949,7 +981,7 @@ private:
         if (cmd == LooperCommand::play || (cmd == LooperCommand::stopPlay && st == LooperState::stopped))
         { if (st == LooperState::recording) finish (false, p); else if (st != LooperState::empty) { state.store (static_cast<int> (LooperState::playing)); fadeGain = 0; stopping = false; } return; }
         if (cmd == LooperCommand::dub && st != LooperState::playing && st != LooperState::overdubbing) return;
-        if (st == LooperState::empty) { recordPosition = 0; generation = 1; data.layers[1].store (true); canUndo = false; originBeat = beat; stopping = false; state.store (static_cast<int> (LooperState::recording)); }
+        if (st == LooperState::empty) { recordBeats = 0; recordBarSize = std::max (.25, p.beatsPerBar); recordGoal = burst ? 0 : p.recordBars * recordBarSize; recordPosition = 0; generation = 1; data.layers[1].store (true); canUndo = false; originBeat = beat; stopping = false; state.store (static_cast<int> (LooperState::recording)); }
         else if (st == LooperState::recording) finish (false, p);
         else if (st == LooperState::playing) { if (generation < 65535) { ++generation; data.layers[generation].store (true); canUndo = false; state.store (static_cast<int> (LooperState::overdubbing)); } }
         else { stopping = false; state.store (static_cast<int> (LooperState::playing)); }
@@ -962,6 +994,8 @@ private:
     std::atomic<int> state { 0 }; std::atomic<float> progress { 0 }; std::atomic<bool> pending { false };
     LooperCommand pendingCommand = LooperCommand::none;
     double position = 0, sampleRate = 44100, internalBeat = 0, originBeat = 0, lastBeat = -1, targetBeat = 0;
+    double pendingGrid = 0, pendingCountIn = 0, recordBeats = 0, recordGoal = 0, recordBarSize = 4;
+    float countdown = 0; bool waiting = false, pendingBar = false;
     int recordPosition = 0; unsigned generation = 1;
     bool canUndo = false, stopping = false;
     float fadeGain = 0, speedSmooth = 1;

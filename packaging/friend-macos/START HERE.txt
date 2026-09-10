@@ -77,3 +77,10 @@ Random retains your recorded loop, transport, tempo and output level.
 Open Settings to change appearance; these choices do not change your sound.
 The recorded-loop display shows your captured phrase and playback position.
 Loop audio can be recalled with projects and saved presets.
+
+NEW IN 0.3.7
+Tuning recalls with presets. TRANSPOSE opens an in-place page with interval,
+fine cents and A4 reference. Five new tuned presets bring the factory bank to 37;
+all use A4 440 Hz. PERFORM adds recording start, one-bar count-in and fixed
+1/2/4/8-bar length (60-second maximum). Armed recording can be cancelled with
+REC or STOP. Existing sessions/presets remain readable. All 65 parameters automate.

@@ -1,12 +1,12 @@
 # MoteField by Rango Labs
 
-MoteField turns incoming audio into layered micro loops, granular textures, rhythmic glitches, and spatial repeats. It combines **11 effect modes**, A-D variations, **32 factory presets**, and a **60-second phrase looper** in a compact hardware-style interface.
+MoteField turns incoming audio into layered micro loops, granular textures, rhythmic glitches, and spatial repeats. It combines **11 effect modes**, A-D variations, **37 factory presets**, and a **60-second phrase looper** in a compact hardware-style interface.
 
 The clear enclosure, sculpted knob rails, and Acid lighting surround a pearl ferrofluid-inspired display. The floating fluid volume deforms, merges, and splits with processed sound and active voices; the adjacent Shape guide shows the grain envelope. Settings offers a custom accent color and dark mode, saved separately from sound presets.
 
 ![MoteField interface](docs/images/motefield.png)
 
-**Current version: 0.3.6 development.** Available as universal macOS AU/VST3 and Windows x64 VST3 test builds. See [VERIFICATION.md](VERIFICATION.md) for checks and remaining host-specific validation.
+**Current version: 0.3.7 development.** Available as universal macOS AU/VST3 and Windows x64 VST3 test builds. See [VERIFICATION.md](VERIFICATION.md) for checks and remaining host-specific validation.
 
 ## Included effects
 
@@ -82,9 +82,27 @@ Record up to 60 seconds and layer it independently of the selected effect.
 
 **Recorded loop audio now saves with DAW projects and user presets.** Overdubs are mixed into the saved phrase; undo history is not serialized. Restoring at a different sample rate resamples the saved audio. Saving during an overdub takes a live snapshot; pause overdubbing first if you need an exact final take.
 
+## Tuning
+
+Click **TRANSPOSE** below the shape envelope to edit tuning inside the same right-hand area. The envelope and output-monitor controls return with the top-left back arrow, Escape, or a click outside the tuning page. Numeric fields only enter editing when clicked.
+
+Transpose spans -24 to +24 semitones, with an interval name and fine adjustment in cents. Drag the liquid vertically or use the tuning controls; both address the same automatable parameter. The reset arrow returns transpose and fine tuning to zero. **A4 reference** adjusts the effect relative to a source tuned to A4 = 440 Hz; it is a reference-pitch offset, not a different temperament or automatic pitch detection. The dry signal is unchanged. Custom references and the 432/440 shortcuts are available; every factory preset uses 440 Hz.
+
+Factory patches now recall their own pitch, material, liquid gestures and pattern settings. Existing factory sounds start at zero global transpose. Five additional starting points demonstrate tuning:
+
+| Preset | Mode | Added tuning | Starting character |
+| --- | --- | --- | --- |
+| Fifth Satellite | Orbit A | +7 semitones | A fifth above the source in sustained layers |
+| Glass Octave | Pluck A | +12 semitones | Bright upper-octave fragments |
+| Low Tide | Smear A | -12 semitones | Low, diffused repeats |
+| Minor Moon | Bloom A | +3 semitones | Minor-third color in overlapping phrases |
+| Soft Detune | Veil A | +6 cents | Slightly detuned granular layers |
+
+These are global offsets added to each mode's own pitch behavior. User presets and DAW projects retain custom tuning.
+
 ## Presets and automation
 
-The preset menu has **Factory** and **User** submenus. Choose from 32 factory starting points covering all eleven modes, or use **Save** to name the current sound. Replacing an existing user preset requires confirmation. An asterisk marks changes from the selected preset, and its name is retained with the DAW session.
+The preset menu has **Factory** and **User** submenus. Choose from 37 factory starting points covering all eleven modes, or use **Save** to name the current sound. Replacing an existing user preset requires confirmation. An asterisk marks changes from the selected preset, and its name is retained with the DAW session.
 
 **Initialize sound** in the preset menu keeps the selected effect mode and loads a simple variation-A starting sound with modest Activity and Repeats, Mix at 40%, Width at 100%, and no added Space or Drift. Material, pitch, pattern and sidechain sound controls return to defaults. Timing/subdivision, output level, monitoring, Hold/Bypass, all looper settings, recorded audio, MIDI mappings and appearance are retained. The preset name becomes **Init - Orbit** (or the current mode). **Undo initialization** restores the previous sound and preset identity; loading, saving or randomizing a sound, or restoring a session, clears this one-step undo. Use **SAVE** to keep your initialized sound. POST recordings keep their captured sound; PRE recordings continue through the live effects.
 
@@ -95,9 +113,9 @@ User presets are portable `.motefield` files stored in:
 - macOS: `~/Library/Application Support/Rango Labs/MoteField/Presets`
 - Windows: `%APPDATA%/Rango Labs/MoteField/Presets`
 
-Use **Refresh user presets** after copying files into that folder. User presets save 49 sound, timing, routing, and performance settings, plus recorded phrase audio when present. Hold, Bypass, and transport gates are excluded. Presets containing a phrase replace the current phrase; sound-only presets retain it. Earlier version-1 preset files remain readable, with defaults for the new controls. Factory presets retain the current timing/sync and looper configuration.
+Use **Refresh user presets** after copying files into that folder. User presets save 54 sound, timing, routing, and performance settings, plus recorded phrase audio when present. Hold, Bypass, and transport gates are excluded. Presets containing a phrase replace the current phrase; sound-only presets retain it. Earlier version-1 and 0.3.6 version-2 preset files remain readable. Missing new controls receive defaults: A4 440 Hz, no count-in, free recording length and Follow loop quantize. Use 0.3.7 or later to open presets saved by this build. Factory presets retain the current timing/sync and looper configuration.
 
-All **61 exposed parameters** support host automation, including Mode, Variation, Hold, Bypass, and six looper command triggers. UI edits notify the host, allowing automation recording where the DAW supports it. Tap writes Tempo and Host Sync; display preferences are not audio parameters.
+All **65 exposed parameters** support host automation, including Mode, Variation, Hold, Bypass, and six looper command triggers. UI edits notify the host, allowing automation recording where the DAW supports it. Tap writes Tempo and Host Sync; display preferences are not audio parameters.
 
 Looper triggers execute on each **0-to-1 or 1-to-0 transition**. Alternate values for repeated commands; a held value does not retrigger. Commands apply at the next processing block, and repeated edges of the same command within a block coalesce. Avoid simultaneous conflicting transport commands. DAW-specific automation behavior still needs host testing.
 
@@ -107,6 +125,9 @@ Open **PERFORM** above the fluid display. Its three pages scroll within the exis
 
 ### Loop & Capture
 
+- **Recording starts:** Follow loop quantize preserves the original Beat/Off choice. Immediately, Next beat, and Next bar override the start of a new recording. In host sync, beat/bar arming waits for the DAW to play. With SUBDIV off, the internal clock uses 4/4. Press REC again or STOP to cancel an armed recording.
+- **Recording count-in:** adds one full bar before recording begins. This is a visual countdown; use the DAW metronome for an audible count-in.
+- **Recording length:** Free, 1, 2, 4 or 8 bars. A fixed recording finishes into Playback or Overdub according to Close recording into. The 60-second capacity still applies, including slow tempos or long meters. Length follows tempo changes during capture; recorded playback is not automatically time-stretched afterward.
 - **Quantize loop:** arm record, play, overdub, or stop for the next quarter-note beat. With host sync enabled, timing uses the DAW's beat position. A host seek rebases an armed command. Changing tempo after recording does not time-stretch the phrase to the new tempo. Erase, Undo, and Burst remain immediate.
 - **Continuous loop speed:** choose between the existing stepped speeds and a smooth 0.25–4x rate. Changing speed also changes pitch; this is varispeed, not pitch-preserving time stretch.
 - **Loop fade:** choose a 0–10 second start/stop fade and in/out direction.
@@ -142,7 +163,7 @@ The surface remains a ferrofluid-inspired interpretation with damped motion, not
 
 Choose **Source note**, **Scale root**, and a major, minor, or pentatonic scale to constrain grain transpositions. Source note is set manually; this does not detect and retune every note in polyphonic audio. Sweeps can travel between the constrained endpoints. Grid's delay taps do not use the grain scale controls.
 
-Select a parameter and click **Learn next MIDI CC**, then move a controller. Mappings save with the DAW project. Defaults: CC1 controls Drift depth, CC11 controls Mix, and CC64 controls Hold. Transport CCs act on a rising press and ignore release, while the Burst gate records until released. MIDI CC events are applied at their sample offsets. Program changes 1–32 select factory presets through the message-thread preset loader, so preset changes are not sample-accurate. Host automation remains available independently of MIDI routing.
+Select a parameter and click **Learn next MIDI CC**, then move a controller. Mappings save with the DAW project. Defaults: CC1 controls Drift depth, CC11 controls Mix, and CC64 controls Hold. Transport CCs act on a rising press and ignore release, while the Burst gate records until released. MIDI CC events are applied at their sample offsets. Program changes 1–37 select factory presets through the message-thread preset loader, so preset changes are not sample-accurate. Host automation remains available independently of MIDI routing.
 
 ## Audio-reactive display
 

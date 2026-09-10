@@ -1,10 +1,10 @@
-MOTEFIELD 0.3.6 / RANGO LABS / WINDOWS TEST BUILD
+MOTEFIELD 0.3.7 / RANGO LABS / WINDOWS TEST BUILD
 
 For Windows 10/11 with a 64-bit VST3-compatible DAW on Intel/AMD.
 This package is not the Mac version. Native Windows ARM testing is pending.
 
 1. Extract the ZIP. Save your session and close your DAW.
-2. Run MoteField-0.3.6-Windows-x64-UNSIGNED.exe.
+2. Run MoteField-0.3.7-Windows-x64-UNSIGNED.exe.
 3. Approve the administrator prompt and complete installation.
 4. Reopen your DAW and rescan VST3 plugins. Look for MoteField by Rango Labs.
 5. Load it on an audio track receiving sound, choose First Light, and raise Mix.
@@ -37,6 +37,13 @@ INCLUDED SINCE 0.3.4
 Stereo Width, Wet Solo, Level Match, more responsive reactor motion, and
 preset arrows directly beside the preset box. All three new controls automate.
 
-FIXED IN 0.3.6
+FIXED IN 0.3.5
 Gentler widening above 100%, capped at 10% extra side gain. POST loops now
 record their width and keep it during playback/export. PRE routing is unchanged.
+
+NEW IN 0.3.7
+Tuning recalls with presets. TRANSPOSE opens an in-place page with interval,
+fine cents and A4 reference. Five new tuned presets bring the factory bank to 37;
+all use A4 440 Hz. PERFORM adds recording start, one-bar count-in and fixed
+1/2/4/8-bar length (60-second maximum). Armed recording can be cancelled with
+REC or STOP. Existing sessions/presets remain readable. All 65 parameters automate.

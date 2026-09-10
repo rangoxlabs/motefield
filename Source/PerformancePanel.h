@@ -38,6 +38,7 @@ public:
         addAndMakeVisible (viewport); viewport.setViewedComponent (&content, false); viewport.setScrollBarsShown (true, false);
         for (const auto& id : MoteFieldAudioProcessor::extendedParameterIds())
         {
+            if (id == "tuningReference") continue; // Edited in the dedicated tuning page.
             auto row = std::make_unique<Row>(); auto* parameter = processor.parameters.getParameter (id);
             row->page = id.startsWith ("loop") || id == "burstGate" || id == "bypassTrails" || id == "holdStyle" ? 1
                       : id.startsWith ("pattern") || id.contains ("Mutation") || id.startsWith ("scale") || id == "sourceNote" ? 3 : 2;
@@ -58,7 +59,7 @@ public:
                 if (milliseconds) return juce::String (juce::roundToInt (v * 1000)) + " ms";
                 if (integer) return juce::String (juce::roundToInt (v));
                 if (std::abs (v) < .005) v = 0;
-                return juce::String (v, pitch ? 1 : 2) + (ratio ? "x" : pitch ? " st" : " s"); };
+                return juce::String (v, 2) + (ratio ? "x" : pitch ? " st" : " s"); };
               row->slider.valueFromTextFunction = [percent,milliseconds] (const juce::String& text)
               { return text.getDoubleValue() / (percent ? 100.0 : milliseconds ? 1000.0 : 1.0); };
               row->slider.updateText();
@@ -146,7 +147,7 @@ public:
         { mutateRhythm.setBounds (8,y,width / 2 - 16,36); mutatePitch.setBounds (width / 2 + 8,y,width / 2 - 16,36);
           learnTarget.setBounds (8,y + 46,width - 16,34); learn.setBounds (8,y + 90,width / 2 - 16,36); clearMidi.setBounds (width / 2 + 8,y + 90,width / 2 - 16,36); y += 140; }
         instructions.setBounds (8, 6, width - 16, 80);
-        instructions.setText (page == 1 ? "Loops are saved with your project and user presets. Quantize schedules commands on the next beat. Capture replaces the phrase with recent output (up to 32 seconds). Drag the WAV button into your DAW."
+        instructions.setText (page == 1 ? "Record immediately, on the next beat/bar, or with a one-bar count-in. Fixed lengths finish automatically (60-second maximum). Synced arming waits for host playback; SUBDIV off uses internal 4/4. Follow loop quantize keeps legacy Beat/Off behavior. Loops save with projects and user presets. Capture replaces the phrase; drag WAV to export."
             : page == 2 ? "On the fluid: drag to scan / transpose, Shift-drag to stretch, Alt-drag to split. Double-click resets the gesture. Viscosity slows the response; Cohesion gathers voices; Tension sharpens their envelope. Feed the Magnet sidechain from another track."
             : "Lock repeats the chosen event pattern; mutations change rhythm or pitch separately. Set Source note to your input's tonal center, then choose a root and scale. This constrains transposition, not individual notes inside a chord. Program changes 1-32 select factory presets.", juce::dontSendNotification);
         content.setSize (width, y); viewport.setViewPosition (0,0);

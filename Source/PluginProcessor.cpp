@@ -69,7 +69,7 @@ void MoteFieldAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, ju
         if (eventSample > cursor) processAudio (buffer, cursor, eventSample - cursor);
         cursor = eventSample;
         const auto message = metadata.getMessage();
-        if (message.isProgramChange()) requestedProgram.store (juce::jlimit (0, 31, message.getProgramChangeNumber()));
+        if (message.isProgramChange()) requestedProgram.store (juce::jlimit (0, 36, message.getProgramChangeNumber()));
         if (! message.isController()) continue;
         const auto cc = message.getControllerNumber(), value = message.getControllerValue();
         const auto learning = midiLearn.exchange (-1);
@@ -141,6 +141,10 @@ void MoteFieldAudioProcessor::processAudio (juce::AudioBuffer<float>& buffer, in
     values.bypass = load (motefield::parameter::bypass) > 0.5f;
 
     values.quantize = load ("loopQuantize") > .5f;
+    values.recordStart = static_cast<int> (load ("loopRecordStart"));
+    values.recordCountIn = load ("loopCountIn") > .5f;
+    const int lengthChoice = static_cast<int> (load ("loopLength"));
+    values.recordBars = lengthChoice == 0 ? 0 : 1 << (lengthChoice - 1);
     values.looperOnly = load ("loopOnly") > .5f; values.trails = load ("bypassTrails") > .5f;
     values.loopFade = load ("loopFade"); values.fadeMode = static_cast<int> (load ("loopFadeMode"));
     values.recordIntoDub = load ("loopRecordOrder") > .5f;
@@ -148,7 +152,7 @@ void MoteFieldAudioProcessor::processAudio (juce::AudioBuffer<float>& buffer, in
     const auto burst = load ("burstGate") > .5f;
     if (burst != previousBurst) { engine.requestLooperCommand (burst ? motefield::LooperCommand::burstStart : motefield::LooperCommand::burstEnd); previousBurst = burst; }
     values.viscosity = load ("viscosity"); values.cohesion = load ("cohesion"); values.tension = load ("tension");
-    values.fieldPosition = load ("fieldPosition"); values.fieldPitch = load ("fieldPitch");
+    values.fieldPosition = load ("fieldPosition"); values.fieldPitch = load ("fieldPitch") + 12.f * std::log2 (load ("tuningReference") / 440.f);
     values.fieldStretch = load ("fieldStretch"); values.fieldSplit = load ("fieldSplit");
     values.magnetAmount = load ("magnetAmount"); values.magnetMode = static_cast<int> (load ("magnetMode"));
     values.magnetAttack = load ("magnetAttack"); values.magnetRelease = load ("magnetRelease");
@@ -163,6 +167,7 @@ void MoteFieldAudioProcessor::processAudio (juce::AudioBuffer<float>& buffer, in
         if (side.getNumChannels() > 1) values.sidechainRight = side.getReadPointer (1) + offset;
     }
     bool hostTempoFound = false;
+    beatsPerBar.store (4.0);
     if (load (motefield::parameter::sync) > 0.5f)
     {
         if (auto* hostPlayHead = getPlayHead())
@@ -171,6 +176,7 @@ void MoteFieldAudioProcessor::processAudio (juce::AudioBuffer<float>& buffer, in
                 if (const auto ppq = position->getPpqPosition()) { values.hostPpq = *ppq; values.hostPositionValid = true; }
                 values.hostPlaying = position->getIsPlaying();
                 if (const auto signature = position->getTimeSignature()) beatsPerBar.store (signature->numerator * 4.0 / signature->denominator);
+                if (const auto bar = position->getPpqPositionOfLastBarStart()) values.hostBarStart = *bar;
                 if (const auto hostBpm = position->getBpm())
                 {
                     values.bpm = *hostBpm;
@@ -178,6 +184,7 @@ void MoteFieldAudioProcessor::processAudio (juce::AudioBuffer<float>& buffer, in
                 }
             }
     }
+    values.beatsPerBar = beatsPerBar.load();
     values.hostPpq += offset / (currentSampleRate * 60.0 / values.bpm);
     receivingHostTempo.store (hostTempoFound, std::memory_order_relaxed);
     effectiveBpm.store (values.bpm, std::memory_order_relaxed);
@@ -392,6 +399,13 @@ juce::AudioProcessorValueTreeState::ParameterLayout MoteFieldAudioProcessor::cre
         juce::AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int) { return juce::String (juce::roundToInt (v * 100.f)) + "%"; })));
     layout.add (std::make_unique<juce::AudioParameterBool> (ParameterID { "wetSolo", 5 }, "Wet Solo", false));
     layout.add (std::make_unique<juce::AudioParameterBool> (ParameterID { "levelMatch", 5 }, "Level Match", false));
+    auto referenceRange = juce::NormalisableRange<float> (1.f, 20000.f, .1f);
+    referenceRange.setSkewForCentre (440.f);
+    layout.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "tuningReference", 6 }, "A4 Reference", referenceRange, 440.f,
+        juce::AudioParameterFloatAttributes().withLabel ("Hz")));
+    layout.add (std::make_unique<juce::AudioParameterChoice> (ParameterID { "loopRecordStart", 6 }, "Recording starts", juce::StringArray { "Follow loop quantize", "Immediately", "Next beat", "Next bar" }, 0));
+    layout.add (std::make_unique<juce::AudioParameterChoice> (ParameterID { "loopCountIn", 6 }, "Recording count-in", juce::StringArray { "Off", "One bar" }, 0));
+    layout.add (std::make_unique<juce::AudioParameterChoice> (ParameterID { "loopLength", 6 }, "Recording length", juce::StringArray { "Free (60 sec max)", "1 bar", "2 bars", "4 bars", "8 bars" }, 0));
     return layout;
 }
 
@@ -415,7 +429,7 @@ juce::StringArray MoteFieldAudioProcessor::factoryPresetNames()
     return { "First Light", "Soft Focus", "Slow Motion", "Paper Planes", "Broken Sun", "After Hours", "Tidal", "Blank Canvas",
         "Warm Current", "Petal Drift", "Long Exposure", "Copper Chain", "Skipping Stones", "Soft Landing", "Sideways Rain",
         "Velvet Veil", "Dust Halo", "Near Orbit", "Moon Pool", "Pin Drops", "Glass Seeds", "Pocket Cuts", "Tape Teeth",
-        "Fault Lines", "Loose Wires", "Half Steps", "Stairwell", "Clock Garden", "Cross Streets", "Ink Wash", "Night Tide", "Open Water" };
+        "Fault Lines", "Loose Wires", "Half Steps", "Stairwell", "Clock Garden", "Cross Streets", "Ink Wash", "Night Tide", "Open Water", "Fifth Satellite", "Glass Octave", "Low Tide", "Minor Moon", "Soft Detune" };
 }
 
 void MoteFieldAudioProcessor::randomizeSound (juce::int64 seed)
@@ -446,7 +460,7 @@ void MoteFieldAudioProcessor::applyFactoryPreset (int index)
     using namespace motefield::parameter;
     // Original starting points. Performance states and loop routing are preserved.
     struct Preset { int modeIndex, variant; float activity, repeat, contour, filter, wet, reverb, drift; int pulse, room; };
-    static constexpr std::array<Preset, 32> presets {{
+    static constexpr std::array<Preset, 37> presets {{
         {0, 1, .62f, .64f, .40f, 14500.f, .55f, .32f, .08f, 4, 1},
         {3, 2, .72f, .62f, .68f, 7800.f, .64f, .48f, .14f, 4, 2},
         {2, 1, .35f, .78f, .55f, 11200.f, .60f, .38f, .10f, 6, 1},
@@ -478,10 +492,25 @@ void MoteFieldAudioProcessor::applyFactoryPreset (int index)
         {9, 3, .74f, .67f, .52f, 9200.f, .48f, .31f, .12f, 3, 1},
         {10, 0, .39f, .57f, .24f, 5600.f, .46f, .36f, .09f, 6, 1},
         {10, 1, .71f, .78f, .65f, 4800.f, .58f, .51f, .23f, 7, 2},
-        {10, 3, .86f, .69f, .37f, 12600.f, .57f, .46f, .27f, 5, 0}
+        {10, 3, .86f, .69f, .37f, 12600.f, .57f, .46f, .27f, 5, 0},
+        {4, 0, .38f, .38f, .40f, 13200.f, .40f, .18f, .03f, 4, 0},
+        {5, 0, .32f, .30f, .75f, 15000.f, .36f, .16f, .02f, 4, 0},
+        {10, 0, .35f, .43f, .32f, 6800.f, .38f, .22f, .03f, 6, 1},
+        {0, 0, .38f, .38f, .42f, 10800.f, .38f, .20f, .04f, 4, 1},
+        {3, 0, .42f, .32f, .35f, 14000.f, .44f, .18f, .02f, 4, 0}
     }};
     index = juce::jlimit (0, static_cast<int> (presets.size()) - 1, index);
     currentProgram.store (index);
+    // Every factory patch owns its material, pitch and pattern state. Keep transport and loop configuration.
+    for (const auto* id : { "viscosity", "cohesion", "tension", "fieldPosition", "fieldPitch", "fieldStretch", "fieldSplit",
+         "magnetAmount", "magnetMode", "magnetAttack", "magnetRelease", "patternSeed", "patternLock", "patternSteps",
+         "rhythmMutation", "pitchMutation", "scale", "scaleRoot", "sourceNote", "tuningReference" })
+    { auto* p = parameters.getParameter (id); setParameterValue (id, p->convertFrom0to1 (p->getDefaultValue())); }
+    if (index >= 32)
+    {
+        static constexpr std::array<float, 5> transposes { 7.f, 12.f, -12.f, 3.f, .06f };
+        setParameterValue ("fieldPitch", transposes[static_cast<std::size_t> (index - 32)]);
+    }
     const auto& preset = presets[static_cast<std::size_t> (index)];
     setParameterValue (mode, static_cast<float> (preset.modeIndex));
     setParameterValue (variation, static_cast<float> (preset.variant));

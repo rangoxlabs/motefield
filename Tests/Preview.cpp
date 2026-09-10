@@ -152,7 +152,7 @@ void checkInitialization (MoteFieldAudioProcessor& processor, MoteFieldAudioProc
     const juce::StringArray retained { "mode", "division", "tempo", "sync", "output", "freeze", "bypass",
         "looperLevel", "looperSpeed", "looperReverse", "looperOrder", "loopQuantize", "loopContinuous",
         "loopRate", "loopFade", "loopFadeMode", "loopOnly", "loopRecordOrder", "burstGate",
-        "bypassTrails", "holdStyle", "wetSolo", "levelMatch" };
+        "bypassTrails", "holdStyle", "wetSolo", "levelMatch", "loopRecordStart", "loopCountIn", "loopLength" };
     const auto phrase = processor.loopData();
     require (phrase.getSize() > 17, "initialization test requires recorded audio");
     const auto transport = processor.getLooperState();
@@ -222,11 +222,17 @@ void checkPresetsAndAutomation (MoteFieldAudioProcessor& processor, const juce::
     using namespace motefield::parameter;
     const auto directory = destination.getNonexistentChildFile ("preset-checks", {}, false);
     const auto names = MoteFieldAudioProcessor::factoryPresetNames();
-    require (names.size() == 32, "factory preset count differs from the bank");
+    require (names.size() == 37, "factory preset count differs from the bank");
     std::set<int> modes;
     for (int i = 0; i < names.size(); ++i)
     {
+        processor.setParameterValue ("fieldPitch", -16.25f); processor.setParameterValue ("tuningReference", 432);
+        processor.setParameterValue ("fieldPosition", .85f); processor.setParameterValue ("fieldSplit", .9f);
         processor.applyFactoryPreset (i);
+        const float pitches[] { 7,12,-12,3,.06f };
+        require (std::abs (processor.parameters.getRawParameterValue ("fieldPitch")->load() - (i < 32 ? 0.f : pitches[i-32])) < .011f, "factory pitch leaked between patches");
+        require (processor.parameters.getRawParameterValue ("tuningReference")->load() == 440.f, "factory reference is not 440 Hz");
+        require (processor.parameters.getRawParameterValue ("fieldPosition")->load() == 0.f && processor.parameters.getRawParameterValue ("fieldSplit")->load() == 0.f, "liquid gesture leaked between patches");
         require (processor.currentPresetName() == names[i] && ! processor.isPresetModified(), "factory preset metadata failed");
         modes.insert (static_cast<int> (processor.parameters.getRawParameterValue (mode)->load()));
     }
@@ -238,6 +244,7 @@ void checkPresetsAndAutomation (MoteFieldAudioProcessor& processor, const juce::
     processor.setParameterValue (looperOrder, 1.f);
     processor.setParameterValue (modDepth, .000001f);
     processor.setParameterValue ("width", 1.63f);
+    processor.setParameterValue ("fieldPitch", 7.06f); processor.setParameterValue ("tuningReference", 442.f);
     require (processor.saveUserPreset ("../escape", false, directory).failed(), "preset filename escaped its folder");
     require (processor.saveUserPreset ("CON", false, directory).failed(), "Windows reserved preset name accepted");
     require (processor.saveUserPreset ("Orbital test", false, directory).wasOk(), "user preset save failed");
@@ -256,6 +263,7 @@ void checkPresetsAndAutomation (MoteFieldAudioProcessor& processor, const juce::
     require (processor.parameters.getRawParameterValue (looperSpeed)->load() == 2.f && processor.parameters.getRawParameterValue (looperOrder)->load() == 1.f, "loop routing did not round trip");
     require (processor.parameters.getRawParameterValue (freeze)->load() == 1.f && processor.parameters.getRawParameterValue (bypass)->load() == 1.f, "preset changed Hold or Bypass");
     require (std::abs(processor.parameters.getRawParameterValue("width")->load()-1.63f)<.001f,"width did not round trip in preset");
+    require (std::abs(processor.parameters.getRawParameterValue("fieldPitch")->load()-7.06f)<.011f && processor.parameters.getRawParameterValue("tuningReference")->load()==442.f,"user tuning did not round trip");
     require (MoteFieldAudioProcessor::userPresetFiles (directory).size() == 1, "saved preset discovery failed");
     juce::MemoryBlock saved;
     processor.getStateInformation (saved);
@@ -269,8 +277,20 @@ void checkPresetsAndAutomation (MoteFieldAudioProcessor& processor, const juce::
     require (processor.loadUserPreset (damaged).failed(), "incomplete preset was accepted");
     require (std::abs (processor.parameters.getRawParameterValue (shape)->load() - .8123f) < .0001f, "invalid preset partially changed sound");
     require (processor.saveUserPreset ("Orbital test", true, directory).wasOk(), "explicit replacement failed");
+    auto oldPreset = juce::XmlDocument::parse (file);
+    require (oldPreset != nullptr, "legacy preset fixture failed");
+    for (auto* child = oldPreset->getFirstChildElement(); child != nullptr;)
+    {
+        auto* next = child->getNextElement();
+        if (juce::StringArray {"tuningReference","loopRecordStart","loopCountIn","loopLength"}.contains(child->getStringAttribute("id"))) oldPreset->removeChildElement(child,true);
+        child = next;
+    }
+    auto legacyFile=directory.getChildFile("legacy-036.motefield"); oldPreset->writeTo(legacyFile);
+    require(processor.loadUserPreset(legacyFile).wasOk(),"0.3.6 user preset rejected");
+    require(processor.parameters.getRawParameterValue("tuningReference")->load()==440.f && std::abs(processor.parameters.getRawParameterValue("fieldPitch")->load()-7.06f)<.011f,"legacy preset lost pitch or inherited reference");
 
-    require (processor.getParameters().size() == 61, "host parameter count changed unexpectedly");
+
+    require (processor.getParameters().size() == 65, "host parameter count changed unexpectedly");
     std::set<juce::String> ids;
     for (auto* parameter : processor.getParameters())
     {
@@ -309,7 +329,7 @@ void checkPresetsAndAutomation (MoteFieldAudioProcessor& processor, const juce::
     trigger (3); require (processor.getLooperState() == motefield::LooperState::stopped, "host Stop trigger failed");
     trigger (5); require (processor.getLooperState() == motefield::LooperState::empty, "host Erase trigger failed");
     processor.setParameterValue (freeze, 0.f);processor.setParameterValue (bypass, 0.f);
-    std::cout << "Preset/automation checks passed: 32 factory presets, all 11 modes, disk round trip, overwrite protection, invalid-file rejection, session identity, 61 host parameters and looper triggers.\n";
+    std::cout << "Preset/automation checks passed: 37 factory presets, all 11 modes, disk round trip, overwrite protection, invalid-file rejection, session identity, 65 host parameters and looper triggers.\n";
 }
 void checkPerformanceIntegration (const juce::File& root)
 {
@@ -565,13 +585,14 @@ int main (int argc, char** argv)
         processor.setParameterValue("width",1.7f);
         auto oldState = processor.parameters.copyState();
         for (int i = oldState.getNumChildren() - 1; i >= 0; --i)
-            if (juce::StringArray { motefield::parameter::bypass, "width", "wetSolo", "levelMatch" }.contains(oldState.getChild (i).getProperty ("id").toString()))
+            if (juce::StringArray { motefield::parameter::bypass, "width", "wetSolo", "levelMatch", "tuningReference", "loopRecordStart", "loopCountIn", "loopLength" }.contains(oldState.getChild (i).getProperty ("id").toString()))
                 oldState.removeChild (i, nullptr);
         juce::MemoryBlock oldBytes;
         juce::AudioProcessor::copyXmlToBinary (*oldState.createXml(), oldBytes);
         processor.setStateInformation (oldBytes.getData(), static_cast<int> (oldBytes.getSize()));
         require (value (motefield::parameter::bypass) < .5f, "v0.1 state did not clear a newer bypass setting");
         require(value("width")==1.f && value("wetSolo")==0.f && value("levelMatch")==0.f,"legacy session failed neutral monitor defaults");
+        require(value("tuningReference")==440.f && value("loopRecordStart")==0.f && value("loopCountIn")==0.f && value("loopLength")==0.f,"legacy session failed new tuning/record defaults");
         processor.setParameterValue (motefield::parameter::freeze, 0.0f);
         processor.setParameterValue (motefield::parameter::bypass, 0.0f);
         click (*editor, "record"); processSilence();
@@ -609,6 +630,26 @@ int main (int argc, char** argv)
         checkInitialization (processor, *editor, destination);
         click (*editor, "erase"); processSilence();
         require (processor.getLooperState() == motefield::LooperState::empty, "erase control failed");
+        // Both pages use the same hardware area; opening never starts text editing.
+        processor.applyFactoryPreset (32); editor->refreshDisplay();
+        for (const int width : { 1000, 1620 })
+        {
+            editor->setSize (width, width * 972 / 1620);
+            click (*editor, "tuning-open");
+            auto* tuning = dynamic_cast<TuningPanel*> (find (*editor, "tuning-panel"));
+            require (tuning && tuning->isOpen(), "tuning page did not open");
+            auto* entry = dynamic_cast<juce::TextEditor*> (find (*editor,"tuning-transpose"));
+            require (entry && !entry->hasKeyboardFocus(false), "opening tuning auto-focused numeric entry");
+            for (auto* child : tuning->getChildren()) if (child->isVisible()) require (tuning->getLocalBounds().contains (child->getBounds()), "tuning control clipped");
+            require (!find(*editor,"wetSolo")->isVisible(), "monitor was not replaced by tuning page");
+            entry->setText ("-16", false); entry->onReturnKey(); editor->refreshDisplay();
+            require (std::abs(value("fieldPitch")+16.f)<.011f,"typed transpose did not update audio parameter");
+            saveImage (*editor, destination.getChildFile ("motefield-tuning-" + juce::String(width) + ".png"));
+            tuning->keyPressed (juce::KeyPress (juce::KeyPress::escapeKey));
+            require (!tuning->isOpen() && find(*editor,"wetSolo")->isVisible(), "Escape failed to restore envelope page");
+            click(*editor,"tuning-reset"); require (std::abs(value("fieldPitch"))<.011f,"tuning reset failed");
+        }
+        std::cout << "Tuning checks passed: in-place page, no auto-focus, typed interval, reset, Escape and two window sizes.\n";
         checkAppearance (*editor,destination);
         checkPresetsAndAutomation (processor, destination);
         require (appearance::read(*editor).cyan==juce::Colour(appearance::acid),"sound preset reset appearance");

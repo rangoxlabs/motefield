@@ -575,7 +575,8 @@ void FieldDisplay::paint (juce::Graphics& g)
     // Inset the entire material, including split satellites, to leave travel room.
     g.drawImage (liquidImage,stage.reduced(stage.getWidth()*.025f,0));
 
-    const auto contour = view.withTrimmedLeft (view.getWidth() * .75f).withTrimmedBottom(78.f*s);
+    if (! envelopeVisible) return;
+    const auto contour = view.withTrimmedLeft (view.getWidth() * .75f).withTrimmedBottom(112.f*s);
     g.setColour (line.withAlpha (.7f));
 
     if (frame.mode == motefield::Mode::grid)
@@ -731,6 +732,10 @@ MoteFieldAudioProcessorEditor::MoteFieldAudioProcessorEditor (MoteFieldAudioProc
     setupButton (wetSoloButton, "WET SOLO", "Hear the effect without the live dry blend. Keeps your Mix setting and recorded loop.", true);
     setupButton (levelMatchButton, "LEVEL MATCH", "Measure three seconds of input and output, then hold level compensation. Relearns after sound changes; waits for signal during silence.", true);
     attachButton ("wetSolo", wetSoloButton); attachButton ("levelMatch", levelMatchButton);
+    tuningPanel = std::make_unique<TuningPanel> (processor);
+    addAndMakeVisible (*tuningPanel);
+    addMouseListener (this, true);
+    tuningPanel->onPageChanged = [this] (bool open) { fieldDisplay.setEnvelopeVisible (! open); for (auto* c : std::array<juce::Component*,4> { &matchStatus, &wetSoloButton, &levelMatchButton, &reverseButton }) c->setVisible (! open); resized(); };
     addAndMakeVisible (matchStatus);
     matchStatus.setJustificationType (juce::Justification::centred);
     matchStatus.setColour (juce::Label::textColourId, juce::Colour (0xffc5cebd));
@@ -819,7 +824,7 @@ MoteFieldAudioProcessorEditor::MoteFieldAudioProcessorEditor (MoteFieldAudioProc
     startTimerHz (60);
 }
 
-MoteFieldAudioProcessorEditor::~MoteFieldAudioProcessorEditor() { stopTimer(); if (momentaryHoldDown) processor.setParameterValue ("freeze",0.f); setLookAndFeel (nullptr); }
+MoteFieldAudioProcessorEditor::~MoteFieldAudioProcessorEditor() { stopTimer(); removeMouseListener (this); tuningPanel.reset(); if (momentaryHoldDown) processor.setParameterValue ("freeze",0.f); setLookAndFeel (nullptr); }
 void MoteFieldAudioProcessorEditor::setupButton (juce::TextButton& button, const juce::String& name,
                                                const juce::String& help, bool toggles, int style)
 {
@@ -1010,6 +1015,11 @@ juce::String MoteFieldAudioProcessorEditor::currentHelp() const
     return modeDescription (static_cast<int> (value (motefield::parameter::mode))) + "  /  "
            + (value (motefield::parameter::reverse) > .5f ? "Reverse" : "Forward");
 }
+void MoteFieldAudioProcessorEditor::mouseDown (const juce::MouseEvent& event)
+{
+    if (tuningPanel && tuningPanel->isOpen() && event.eventComponent != tuningPanel.get() && ! tuningPanel->isParentOf (event.eventComponent)) tuningPanel->setOpen (false);
+}
+
 void MoteFieldAudioProcessorEditor::refreshDisplay()
 {
     for (juce::PopupMenu::MenuItemIterator item (*presetBox.getRootMenu()); item.next();)
@@ -1029,6 +1039,8 @@ void MoteFieldAudioProcessorEditor::refreshDisplay()
     frame.reverse = value (reverse) > .5f;
     frame.bypass = value (bypass) > .5f;
     frame.width = value ("width");
+    frame.fieldPitch = value ("fieldPitch"); frame.fieldPosition = value ("fieldPosition"); frame.fieldStretch = value ("fieldStretch"); frame.fieldSplit = value ("fieldSplit");
+    if (tuningPanel) tuningPanel->refresh();
     matchStatus.setText (value ("levelMatch") < .5f ? "OUTPUT MONITOR" : frame.matchLearning ? "LEVEL MATCH / LEARNING" : "LEVEL MATCH / " + juce::String (juce::Decibels::gainToDecibels(frame.matchGain), 1) + " dB", juce::dontSendNotification);
     fieldDisplay.setSampleRate (processor.getSampleRate());
     fieldDisplay.setShape (value (shape));
@@ -1048,7 +1060,7 @@ void MoteFieldAudioProcessorEditor::refreshDisplay()
     playButton.setToggleState (playing, juce::dontSendNotification);
     dubButton.setEnabled (playing || dubbing);
     dubButton.setToggleState (dubbing, juce::dontSendNotification);
-    stopButton.setEnabled (recording || playing || dubbing);
+    stopButton.setEnabled (recording || playing || dubbing || frame.loopPending);
     undoButton.setEnabled (frame.canUndo);
     eraseButton.setEnabled (! empty);
     preButton.setToggleState (value (looperOrder) > .5f, juce::dontSendNotification);
@@ -1095,7 +1107,8 @@ void MoteFieldAudioProcessorEditor::resized()
     {const auto angle=(-120.f+i*30.f)*pi/180.f;place(modeButtons[i],252+std::sin(angle)*116-27,369-std::cos(angle)*116-13,54,26);}
     for(int i=0;i<4;++i)place(variationButtons[i],126+i*65,502,60,44);
     place(fieldDisplay,431,221,1090,321);
-    place(matchStatus,1236,425,240,20); matchStatus.setFont(font(11*s));
+    if (tuningPanel) { if (tuningPanel->isOpen()) place (*tuningPanel,1236,239,240,306); else place (*tuningPanel,1236,378,240,48); }
+    place(matchStatus,1236,428,240,20); matchStatus.setFont(font(11*s));
     place(wetSoloButton,1236,450,114,40); place(levelMatchButton,1362,450,114,40);
     for(auto* b:{&wetSoloButton,&levelMatchButton}) { b->getProperties().set("darkControl",true); }
     place(reverseButton,1294,510,145,35);reverseButton.getProperties().set("darkControl",true);
@@ -1130,7 +1143,9 @@ void MoteFieldAudioProcessorEditor::paint(juce::Graphics& g)
     text(g,"RECORDED LOOP",{86,729,177,27},16,juce::Colours::white);
     text(g,"Loop 01",{94,762,160,26},19,juce::Colours::white);
     text(g,secondsText(f.loopSeconds),{94,792,165,24},15,juce::Colours::white);
-    const auto state=processor.getLooperState();const auto status=state==motefield::LooperState::empty?"READY":state==motefield::LooperState::recording?"RECORDING":state==motefield::LooperState::overdubbing?"OVERDUB":state==motefield::LooperState::stopped?"STOPPED":"PLAYING";
+    const auto state=processor.getLooperState();juce::String status=state==motefield::LooperState::empty?"READY":state==motefield::LooperState::recording?"RECORDING":state==motefield::LooperState::overdubbing?"OVERDUB":state==motefield::LooperState::stopped?"STOPPED":"PLAYING";
+    if (f.loopPending) status = f.loopWaiting ? "WAIT FOR HOST" : "IN " + juce::String (f.loopCountdown, 1) + " BEATS";
+    else if (state == motefield::LooperState::recording && f.recordingBars > 0) status = "REC " + juce::String (f.recordingBar) + "/" + juce::String (f.recordingBars) + " BARS";
     text(g,status,{95,825,164,24},15,p.cyan);
     if(detailsOpen){text(g,"REVERB CHARACTER",{962,992,234,24},13,p.muted);text(g,"LOOP SPEED",{1240,992,260,24},13,p.muted);text(g,"SUBDIVISION",{962,1084,234,24},13,p.muted);text(g,"DISPLAY",{1240,1084,234,24},13,p.muted);}
 }
