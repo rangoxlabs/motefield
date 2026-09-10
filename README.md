@@ -6,7 +6,7 @@ The clear enclosure, sculpted knob rails, and Acid lighting surround a pearl fer
 
 ![MoteField interface](docs/images/motefield.png)
 
-**Current version: 0.3.7 development.** Available as universal macOS AU/VST3 and Windows x64 VST3 test builds. See [VERIFICATION.md](VERIFICATION.md) for checks and remaining host-specific validation.
+**Current version: 0.3.8 development.** This update targets universal macOS AU/VST3. The latest shared Windows x64 VST3 test build remains 0.3.7. See [VERIFICATION.md](VERIFICATION.md) for checks and remaining host-specific validation.
 
 ## Included effects
 
@@ -80,7 +80,13 @@ Record up to 60 seconds and layer it independently of the selected effect.
 | **Loop Reverse** | Reverse phrase playback independently of FX Reverse. |
 | **Loop Speed** | Play at half, normal, or double speed. Available in Details. |
 
+**Copying a MoteField instance between tracks retains its edited parameters and recorded loop.** Version 0.3.8 fixes restoration when a host prepares the new instance before supplying its saved state.
+
 **Recorded loop audio now saves with DAW projects and user presets.** Overdubs are mixed into the saved phrase; undo history is not serialized. Restoring at a different sample rate resamples the saved audio. Saving during an overdub takes a live snapshot; pause overdubbing first if you need an exact final take.
+
+## Details and reverb audition
+
+**Details** expands below the instrument without shrinking the controls. When the host or screen cannot provide enough height, scroll vertically to reach the drawer. The main reactor and envelope remain available above it. **Reverb Solo**, beneath Reverb Character, isolates the existing reverb return at the current Space amount. It does not change Mix or recorded audio; closing Details ends audition.
 
 ## Tuning
 

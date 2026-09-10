@@ -2,7 +2,7 @@
 
 ## Current status
 
-Version **0.3.7** targets universal macOS VST3/AU and Windows x64 VST3. See [VERIFICATION.md](VERIFICATION.md) for build, installation and host-test results.
+Version **0.3.8** contains the approved Details drawer, reverb audition, tuning alignment and instance-copy fixes on the 0.3.7 sound engine. This release pass builds universal macOS VST3/AU; the latest shared Windows package remains 0.3.7. See [VERIFICATION.md](VERIFICATION.md) for build, installation and host-test results.
 
 The repository includes macOS and Windows build jobs that produce unsigned development installers. Public release signing, notarization, clean-machine installation, upgrades, and native host testing remain release checks. Generated bundles and installers are excluded from source control.
 
