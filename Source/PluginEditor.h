@@ -94,7 +94,7 @@ private:
     const FieldDisplay& field;
 };
 
-class MoteFieldAudioProcessorEditor final : public juce::AudioProcessorEditor, private juce::Timer
+class MoteFieldAudioProcessorEditor final : public juce::AudioProcessorEditor, private juce::Timer, private juce::ScrollBar::Listener
 {
 public:
     explicit MoteFieldAudioProcessorEditor (MoteFieldAudioProcessor&);
@@ -104,6 +104,7 @@ public:
     void refreshDisplay();
     void applyAppearance();
     void mouseDown (const juce::MouseEvent&) override;
+    void mouseWheelMove (const juce::MouseEvent&, const juce::MouseWheelDetails&) override;
 private:
     using SliderAttachment = juce::AudioProcessorValueTreeState::SliderAttachment;
     using ButtonAttachment = juce::AudioProcessorValueTreeState::ButtonAttachment;
@@ -115,6 +116,9 @@ private:
     void updateTimeAttachment();
     void tapTempo();
     void setDetailsOpen (bool);
+    void scrollBarMoved (juce::ScrollBar*, double) override;
+    juce::ScrollBar detailsScroll { true };
+    float scrollOffset = 0.f;
     void loadPreset (int);
     void refreshPresetMenu();
     void selectPresetItem (int);

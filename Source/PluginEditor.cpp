@@ -810,6 +810,9 @@ MoteFieldAudioProcessorEditor::MoteFieldAudioProcessorEditor (MoteFieldAudioProc
         settingsPanel = std::make_unique<appearance::SettingsPanel> (*appearancePreferences, [this] { applyAppearance(); });
         addAndMakeVisible (*settingsPanel); settingsPanel->setBounds (getLocalBounds()); settingsPanel->sendLookAndFeelChange(); settingsPanel->toFront (true); settingsPanel->grabKeyboardFocus();
     };
+    detailsScroll.setComponentID("details-scroll");
+    detailsScroll.setColour(juce::ScrollBar::thumbColourId,juce::Colour(0xffa9b39f));
+    detailsScroll.addListener(this);addChildComponent(detailsScroll);
     applyAppearance();
     updateTimeAttachment();
     setResizable (true, true);
@@ -984,9 +987,40 @@ void MoteFieldAudioProcessorEditor::setDetailsOpen (bool open)
     if (detailsOpen == open) return;
     if (tuningPanel && tuningPanel->isOpen()) tuningPanel->setOpen (false);
     detailsOpen = open;
-    // Details is a page of the existing display, never a window resize.
     if (! open) processor.setParameterValue ("reverbSolo", 0.f);
+    scrollOffset = 0;
+    const auto width = getWidth();
+    const auto fullHeight = juce::roundToInt(width * (open ? 1220.0 : 972.0) / 1620.0);
+    auto height = fullHeight;
+    if (open)
+    {
+        const auto bounds = getScreenBounds();
+        if (const auto* display = juce::Desktop::getInstance().getDisplays().getDisplayForRect(bounds))
+        {
+            const auto hostScale = static_cast<double>(bounds.getHeight()) / juce::jmax(1,getHeight());
+            const auto room = juce::roundToInt((display->userBounds.getBottom() - bounds.getY() - 12) / juce::jmax(.1,hostScale));
+            height = juce::jmax(getHeight(),juce::jmin(fullHeight,room));
+        }
+    }
+    // Grow downward at the existing width. A short screen gets scrolling,
+    // never a narrower instrument or controls scaled to the extra height.
+    getConstrainer()->setFixedAspectRatio(open ? 0.0 : 1620.0/972.0);
+    const auto minimumWidth=juce::jmin(900,width);
+    setResizeLimits(minimumWidth,juce::roundToInt(minimumWidth*972.0/1620.0),1860,1600);
+    setSize(width,height);
     resized(); repaint();
+}
+
+void MoteFieldAudioProcessorEditor::mouseWheelMove (const juce::MouseEvent& event, const juce::MouseWheelDetails& wheel)
+{
+    if (detailsScroll.isVisible())
+        detailsScroll.setCurrentRangeStart(scrollOffset-wheel.deltaY*240.f,juce::sendNotificationSync);
+    else juce::AudioProcessorEditor::mouseWheelMove(event,wheel);
+}
+
+void MoteFieldAudioProcessorEditor::scrollBarMoved (juce::ScrollBar*, double start)
+{
+    scrollOffset=static_cast<float>(start);resized();repaint();
 }
 
 juce::String MoteFieldAudioProcessorEditor::currentHelp() const
@@ -1076,8 +1110,15 @@ void MoteFieldAudioProcessorEditor::applyAppearance()
 void MoteFieldAudioProcessorEditor::resized()
 {
     const auto s=static_cast<float>(getWidth())/1620.f;
-    const auto place=[s](juce::Component& c,float x,float y,float w,float h){c.setBounds(juce::Rectangle<float>(x*s,y*s,w*s,h*s).toNearestInt());};
-    const auto height=972;
+    const auto height=detailsOpen?1220:972;
+    const auto overflow=juce::jmax(0.f,height*s-getHeight());
+    scrollOffset=detailsOpen?juce::jlimit(0.f,overflow,scrollOffset):0.f;
+    detailsScroll.setVisible(detailsOpen && overflow>.5f);
+    detailsScroll.setBounds(getWidth()-11,0,10,getHeight());
+    detailsScroll.setRangeLimits(0,height*s,juce::dontSendNotification);
+    detailsScroll.setCurrentRange(scrollOffset,getHeight(),juce::dontSendNotification);
+    detailsScroll.toFront(false);
+    const auto place=[s,this](juce::Component& c,float x,float y,float w,float h){c.setBounds(juce::Rectangle<float>(x*s,y*s-scrollOffset,w*s,h*s).toNearestInt());};
     if(!hardwarePanel.isValid()||hardwarePanel.getHeight()!=height)hardwarePanel=makeHardwarePanel(height,lookAndFeel.colours);
     for(auto& b:modeButtons)b.getProperties().set("glassDark",true);
     for(int i=0;i<4;++i)place(*knobs[i],443+i*201,79,116,133);
@@ -1108,22 +1149,21 @@ void MoteFieldAudioProcessorEditor::resized()
     place(tempoLabel,245,878,119,45);tempoLabel.setFont(font(13*s));place(performanceButton,363,878,89,45);
     place(randomPresetButton,806,34,100,48);
     place(presetBox,978,34,288,48);place(previousPreset,918,34,52,48);place(nextPreset,1277,34,46,48);place(savePresetButton,1333,34,74,48);
-    fieldDisplay.setVisible (! detailsOpen);
-    if (tuningPanel) tuningPanel->setVisible (! detailsOpen);
+    fieldDisplay.setVisible(true);
+    if (tuningPanel) tuningPanel->setVisible(true);
     for (auto* c : std::array<juce::Component*,4> { &matchStatus, &wetSoloButton, &levelMatchButton, &reverseButton })
-        c->setVisible (! detailsOpen && ! tuningPanel->isOpen());
-    for(int i=8;i<12;++i){knobs[i]->setVisible(detailsOpen);knobs[i]->getProperties().set("darkControl",true);place(*knobs[i],467+(i-8)*173,309,142,160);}
-    for(auto* c:std::array<juce::Component*,4>{&roomBox,&speedBox,&divisionBox,&motionButton})c->setVisible(detailsOpen);
-    reverbSoloButton.setVisible (detailsOpen);
-    reverbSoloButton.getProperties().set ("darkControl",true);
-    motionButton.getProperties().set ("darkControl",true);
-    place(roomBox,1236,288,240,40);place(reverbSoloButton,1236,338,240,40);
-    place(speedBox,1236,418,240,40);place(divisionBox,477,497,220,37);place(motionButton,886,497,220,37);
+        c->setVisible(!tuningPanel->isOpen());
+    for(int i=8;i<12;++i){knobs[i]->setVisible(detailsOpen);knobs[i]->getProperties().set("darkControl",false);place(*knobs[i],60+(i-8)*210,1000,164,178);}
+    for(auto* c:std::array<juce::Component*,5>{&roomBox,&speedBox,&divisionBox,&motionButton,&reverbSoloButton})c->setVisible(detailsOpen);
+    reverbSoloButton.getProperties().set("darkControl",false);
+    motionButton.getProperties().set("darkControl",false);
+    place(roomBox,962,1020,234,42);place(reverbSoloButton,962,1070,234,40);
+    place(speedBox,1240,1020,290,42);place(divisionBox,962,1152,234,42);place(motionButton,1240,1152,290,42);
 }
 
 void MoteFieldAudioProcessorEditor::paint(juce::Graphics& g)
 {
-    const auto p=appearance::read(*this);const auto s=static_cast<float>(getWidth())/1620.f;g.addTransform(juce::AffineTransform::scale(s));g.drawImageAt(hardwarePanel,0,0);
+    const auto p=appearance::read(*this);const auto s=static_cast<float>(getWidth())/1620.f;g.addTransform(juce::AffineTransform::scale(s).translated(0,-scrollOffset));g.drawImageAt(hardwarePanel,0,0);
     {juce::Graphics::ScopedSaveState saved(g);const auto drive=motionButton.getToggleState()?0.f:logoDrive;
      g.addTransform(juce::AffineTransform::scale(1.f+drive*.045f,1.f-drive*.025f,132.f,56.f));g.setColour(p.ink);g.drawImage(rangoLogo,juce::Rectangle<float>(80,7,113,99),juce::RectanglePlacement::centred,true);}
     text(g,"MoteField",{192,27,350,40},33,p.ink,false);text(g,"by Rango Labs",{192,66,280,23},17,p.muted);
@@ -1140,13 +1180,9 @@ void MoteFieldAudioProcessorEditor::paint(juce::Graphics& g)
     text(g,status,{95,825,164,24},15,p.cyan);
     if(detailsOpen)
     {
-        const auto labelColour=juce::Colour(0xffd5dcd4);
-        text(g,"DETAILS",{477,247,600,30},18,labelColour);
-        text(g,"REVERB CHARACTER",{1236,255,240,24},13,labelColour);
-        text(g,"LOOP SPEED",{1236,386,240,24},13,labelColour);
-        text(g,"SUBDIVISION",{477,472,220,23},12,labelColour);
-        text(g,"DISPLAY",{886,472,220,23},12,labelColour);
-        text(g,"Solo follows the Space amount.",{1236,473,240,23},11,labelColour);
-        text(g,"Close Details to return.",{1236,498,240,23},11,labelColour);
+        text(g,"REVERB CHARACTER",{962,992,234,24},13,p.muted);
+        text(g,"LOOP SPEED",{1240,992,260,24},13,p.muted);
+        text(g,"SUBDIVISION",{962,1124,234,24},13,p.muted);
+        text(g,"DISPLAY",{1240,1124,234,24},13,p.muted);
     }
 }

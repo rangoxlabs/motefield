@@ -210,6 +210,7 @@ void MoteFieldAudioProcessor::getStateInformation (juce::MemoryBlock& destinatio
 {
     if (const auto xml = parameters.copyState().createXml())
     {
+        xml->setAttribute ("currentProgram", currentProgram.load());
         auto* audio = xml->createNewChildElement ("LoopAudio"); audio->addTextElement (loopData().toBase64Encoding());
         auto* mappings = xml->createNewChildElement ("MidiMappings");
         for (std::size_t cc = 0; cc < midiMap.size(); ++cc) if (midiMap[cc].load() >= 0)
@@ -247,6 +248,10 @@ void MoteFieldAudioProcessor::setStateInformation (const void* data, int sizeInB
                 hasBypass = hasBypass || child.getProperty ("id").toString() == motefield::parameter::bypass;
             if (! hasBypass)
                 parameters.getParameter (motefield::parameter::bypass)->setValueNotifyingHost (0.0f);
+            // Hosts also query/reapply the program index when copying an instance.
+            // Preserve the identity without reloading its factory values over edits.
+            const auto fallback = factoryPresetNames().indexOf (restored.getProperty ("presetName").toString());
+            currentProgram.store (juce::jlimit (0, getNumPrograms()-1, xml->getIntAttribute ("currentProgram", juce::jmax (0, fallback))));
             parameters.replaceState (restored);
             pendingLooperTriggers.store (0); requestedProgram.store (-1);
             previousBurst = parameters.getRawParameterValue ("burstGate")->load() > .5f;

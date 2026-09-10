@@ -331,6 +331,73 @@ void checkPresetsAndAutomation (MoteFieldAudioProcessor& processor, const juce::
     processor.setParameterValue (freeze, 0.f);processor.setParameterValue (bypass, 0.f);
     std::cout << "Preset/automation checks passed: 37 factory presets, all 11 modes, disk round trip, overwrite protection, invalid-file rejection, session identity, 66 host parameters and looper triggers.\n";
 }
+void checkInstanceCopy()
+{
+    constexpr int block=256;
+    MoteFieldAudioProcessor source;
+    source.prepareToPlay(48000,block);
+    source.applyFactoryPreset(17);
+    source.setParameterValue("shape",.813f);
+    source.setParameterValue("fieldPitch",7.06f);
+    source.setParameterValue("loopQuantize",0.f);
+    juce::AudioBuffer<float> buffer(2,block); juce::MidiBuffer midi;
+    const auto tick=[&](MoteFieldAudioProcessor& p)
+    {
+        buffer.clear();for(int i=0;i<block;++i){buffer.setSample(0,i,.1f*std::sin(i*.07f));buffer.setSample(1,i,.08f*std::cos(i*.05f));}
+        p.processBlock(buffer,midi);
+    };
+    source.requestLooperCommand(motefield::LooperCommand::record);
+    for(int i=0;i<8;++i)tick(source);
+    source.requestLooperCommand(motefield::LooperCommand::play);tick(source);
+    const auto phrase=source.loopData();
+    juce::MemoryBlock saved;source.getStateInformation(saved);
+    const auto assertCopy=[&](MoteFieldAudioProcessor& copy)
+    {
+        require(std::abs(copy.parameters.getRawParameterValue("shape")->load()-.813f)<.0001f,"copy lost tweaked shape after prepare-before-restore");
+        require(std::abs(copy.parameters.getRawParameterValue("fieldPitch")->load()-7.06f)<.001f,"copy lost tuning");
+        require(copy.currentPresetName()==source.currentPresetName() && copy.isPresetModified(),"copy lost modified preset identity");
+        for(auto* parameter:source.getParameters())
+            if(auto* ranged=dynamic_cast<juce::RangedAudioParameter*>(parameter))
+                require(copy.parameters.getParameter(ranged->paramID)->getValue()==ranged->getValue(),"copy changed a parameter");
+        require(copy.loopData()==phrase,"copy lost recorded audio");
+        require(copy.getCurrentProgram()==source.getCurrentProgram(),"copy lost host program identity");
+    };
+    // Hosts may prepare a new track before supplying its saved instance state.
+    MoteFieldAudioProcessor preparedFirst;preparedFirst.prepareToPlay(48000,block);
+    preparedFirst.setStateInformation(saved.getData(),static_cast<int>(saved.getSize()));
+    assertCopy(preparedFirst);
+    // Repeated pastes and save-before-first-audio must retain the newest state.
+    preparedFirst.setStateInformation(saved.getData(),static_cast<int>(saved.getSize()));assertCopy(preparedFirst);
+    preparedFirst.setCurrentProgram(source.getCurrentProgram());
+    juce::Thread::sleep(40);pump();assertCopy(preparedFirst);
+    tick(preparedFirst);assertCopy(preparedFirst);
+    preparedFirst.releaseResources();preparedFirst.prepareToPlay(48000,512);assertCopy(preparedFirst);
+    tick(preparedFirst);assertCopy(preparedFirst);
+    MoteFieldAudioProcessor stateFirst;stateFirst.setStateInformation(saved.getData(),static_cast<int>(saved.getSize()));
+    assertCopy(stateFirst);stateFirst.prepareToPlay(48000,block);assertCopy(stateFirst);tick(stateFirst);assertCopy(stateFirst);
+    require(source.loopData()==phrase,"copy changed original instance audio");
+    source.setParameterValue("shape",.31f);
+    source.requestLooperCommand(motefield::LooperCommand::clear);tick(source);
+    source.requestLooperCommand(motefield::LooperCommand::record);for(int i=0;i<4;++i)tick(source);
+    source.requestLooperCommand(motefield::LooperCommand::play);tick(source);
+    const auto newerPhrase=source.loopData();require(newerPhrase!=phrase,"newer copy fixture is unchanged");
+    juce::MemoryBlock newer;source.getStateInformation(newer);
+    preparedFirst.setStateInformation(saved.getData(),static_cast<int>(saved.getSize()));
+    preparedFirst.setStateInformation(newer.getData(),static_cast<int>(newer.getSize()));
+    require(preparedFirst.loopData()==newerPhrase,"pending copy did not use latest loop");
+    juce::MemoryBlock immediate;preparedFirst.getStateInformation(immediate);
+    MoteFieldAudioProcessor chained;chained.setStateInformation(immediate.getData(),static_cast<int>(immediate.getSize()));
+    require(chained.loopData()==newerPhrase,"copy of pending copy lost loop");
+    tick(preparedFirst);
+    require(preparedFirst.loopData()==newerPhrase && std::abs(preparedFirst.parameters.getRawParameterValue("shape")->load()-.31f)<.0001f,"latest restore failed after audio starts");
+    source.requestLooperCommand(motefield::LooperCommand::clear);tick(source);source.getStateInformation(newer);
+    preparedFirst.setStateInformation(newer.getData(),static_cast<int>(newer.getSize()));tick(preparedFirst);
+    require(preparedFirst.getLooperState()==motefield::LooperState::empty,"empty copy retained previous loop");
+    preparedFirst.setCurrentProgram(2);juce::Thread::sleep(40);pump();
+    require(preparedFirst.getCurrentProgram()==2,"explicit host program change stopped working");
+    std::cout<<"Instance-copy checks passed: prepare/state ordering, repeated restore, immediate save, reprepare, tweaked sound and exact loop audio.\n";
+}
+
 void checkPerformanceIntegration (const juce::File& root)
 {
     const auto destination = root.getNonexistentChildFile ("integration-checks", {}, false);
@@ -499,6 +566,8 @@ int main (int argc, char** argv)
             require (juce::PNGImageFormat().writeImageToStream (comparison,*stream), "face comparison failed");
             std::cout << "Three native face studies captured.\n"; return 0;
         }
+        checkInstanceCopy();
+        if (argc > 2 && juce::String(argv[2]) == "--copy-only") return 0;
         checkPerformanceIntegration (destination);
         processor.prepareToPlay (48000.0, 400);
         PlayHead playhead;
@@ -670,12 +739,15 @@ int main (int argc, char** argv)
         const auto resetBounds = find(*editor,"tuning-reset")->getBounds();
         require (readoutBounds.getY()==resetBounds.getY() && readoutBounds.getBottom()==resetBounds.getBottom() && readoutBounds.getRight()<resetBounds.getX(), "compact tuning controls do not align");
         click (*editor, "details");
-        require (editor->getLocalBounds()==closedSize && find(*editor,"shape")->getScreenBounds()==mainKnobBounds, "Details resized the window or main knobs");
+        require (editor->getWidth()==closedSize.getWidth() && editor->getHeight()>=closedSize.getHeight() && find(*editor,"shape")->getScreenBounds()==mainKnobBounds, "Details shrank the window or resized the main knobs");
         auto* outputKnob = find (*editor, motefield::parameter::output);
         require (outputKnob != nullptr && outputKnob->isVisible() && outputKnob->getParentComponent()->isVisible(), "Details drawer did not open");
-        require (editor->getLocalBounds().contains (editor->getLocalArea (outputKnob, outputKnob->getLocalBounds())), "Details output knob is clipped");
+        auto* drawerScroll=dynamic_cast<juce::ScrollBar*>(find(*editor,"details-scroll"));
+        require(drawerScroll!=nullptr,"Details scroll control missing");
+        if(drawerScroll->isVisible()) {drawerScroll->setCurrentRangeStart(drawerScroll->getMaximumRangeLimit(),juce::sendNotificationSync);pump();}
+        require (editor->getLocalBounds().contains (editor->getLocalArea (outputKnob, outputKnob->getLocalBounds())), "Details output knob is unreachable");
         for (auto* child : editor->getChildren())
-            if (child->isVisible()) require (editor->getLocalBounds().contains (child->getBounds()), "Details contains a clipped control");
+            if (child->isVisible() && !drawerScroll->isVisible()) require (editor->getLocalBounds().contains (child->getBounds()), "Details contains a clipped control");
         click(*editor,"reverbSolo");
         require(value("reverbSolo")>.5f,"Reverb Solo button did not reach processor");
         const auto mixBefore=value("mix");
@@ -689,9 +761,15 @@ int main (int argc, char** argv)
         {
             editor->setSize(width,width*3/5);
             const auto before=editor->getLocalBounds();
+            const auto originalKnobWidth=find(*editor,"shape")->getWidth();
             click(*editor,"details");
-            require(editor->getLocalBounds()==before,"Details changes size at alternate scale");
-            for(auto* child:editor->getChildren()) if(child->isVisible()) require(before.contains(child->getBounds()),"Details clips at alternate scale");
+            require(editor->getWidth()==before.getWidth(),"Details changes width at alternate scale");
+            // Simulate a host which cannot grow the window on a small screen.
+            editor->setSize(width,before.getHeight());
+            require(drawerScroll->isVisible(),"short host window has no scrollbar");
+            drawerScroll->setCurrentRangeStart(drawerScroll->getMaximumRangeLimit(),juce::sendNotificationSync);pump();
+            require(editor->getLocalBounds().contains(editor->getLocalArea(outputKnob,outputKnob->getLocalBounds())),"scrolling cannot reach advanced knobs");
+            require(find(*editor,"shape")->getWidth()==originalKnobWidth,"scrolling scaled the main knob");
             saveImage(*editor,destination.getChildFile("motefield-details-"+juce::String(width)+".png"));
             click(*editor,"details");
         }

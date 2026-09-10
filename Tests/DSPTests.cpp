@@ -705,10 +705,43 @@ void testScheduledRecording()
     std::cout<<"Recording timing passed: exact four-bar count-in capture, host stopped/restart, 3/4, 1/4, 1/8, cancel, tempo change, overdub and legacy beat quantize.\n";
 }
 
+void testConcurrentLoopRestore()
+{
+    motefield::Engine engine;engine.prepare(8000,64,2);
+    motefield::AudioSnapshot saved;saved.sampleRate=8000;saved.playing=false;
+    std::atomic<bool> running{true}, valid{true};
+    std::thread audio([&]
+    {
+        std::array<float,64> input{},l{},r{};const float* in[]{input.data(),input.data()};float* out[]{l.data(),r.data()};
+        motefield::EngineParameters p;p.mix=0;watchingAudioAllocations=true;audioAllocations=0;
+        while(running.load())
+        {
+            engine.process(in,out,2,64,p);
+            for(float x:l) if(!std::isfinite(x))valid.store(false);
+        }
+        if(audioAllocations!=0)valid.store(false);watchingAudioAllocations=false;
+    });
+    bool restored=true;
+    for(int n=0;n<24;++n)
+    {
+        for(auto& channel:saved.audio)channel.assign(static_cast<std::size_t>(512+n),.001f*(n+1));
+        restored=engine.restoreLoop(saved)&&restored;
+        const auto copy=engine.snapshotLoop();
+        if(copy.audio!=saved.audio)valid.store(false);
+    }
+    running.store(false);audio.join();
+    require(restored,"concurrent restore rejected a valid replacement");
+    require(valid.load(),"concurrent handoff tore loop audio, produced invalid output or allocated on audio thread");
+    require(engine.snapshotLoop().audio==saved.audio,"final concurrent restore was lost");
+    std::cout<<"Concurrent loop restore passed: newest archive survives publication, snapshots and allocation-free audio handoff.\n";
+}
+
 } // namespace
 
-int main (int argc, char**)
+int main (int argc, char** argv)
 {
+    testConcurrentLoopRestore();
+    if(argc>1 && std::string(argv[1])=="--restore-only")return 0;
     testScheduledRecording();
     testWidthPrintAndMonoCompatibility();
     testOutputMonitoring();

@@ -114,7 +114,12 @@ juce::Result MoteFieldAudioProcessor::captureHistory (int bars)
     if (snapshot.audio[0].empty()) return juce::Result::fail ("Play some audio before capturing history.");
     return engine.restoreLoop (snapshot) ? juce::Result::ok() : juce::Result::fail ("The previous capture is still loading. Try again after playback resumes.");
 }
-void MoteFieldAudioProcessor::setCurrentProgram (int index) { requestedProgram.store (juce::jlimit (0,36,index)); }
+void MoteFieldAudioProcessor::setCurrentProgram (int index)
+{
+    index = juce::jlimit (0, getNumPrograms()-1, index);
+    // Reasserting the selected host program must not discard its edited state.
+    requestedProgram.store (index == currentProgram.load() ? -1 : index);
+}
 void MoteFieldAudioProcessor::timerCallback()
 {
     const auto index = requestedProgram.exchange (-1);

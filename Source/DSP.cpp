@@ -768,7 +768,7 @@ public:
         std::lock_guard<std::mutex> lock (archiveMutex);
         sampleRate = rate;
         slots[0] = std::make_unique<Storage> (static_cast<int> (std::ceil (rate * 60.0)));
-        slots[1].reset(); slots[2].reset(); active.store (0); pendingSlot.store (-1); reader.store (-1);
+        slots[1].reset(); slots[2].reset(); slots[3].reset(); active.store (0); pendingSlot.store (-1); latestSlot.store (0); freeSlots.store (0b1110u);
         reset();
     }
     void reset() noexcept
@@ -781,24 +781,25 @@ public:
     }
     void beginBlock() noexcept
     {
-        const auto next = pendingSlot.load (std::memory_order_acquire);
+        const auto next = pendingSlot.exchange (-1, std::memory_order_acq_rel);
         if (next >= 0)
         {
-            active.store (next, std::memory_order_release);
+            const auto previous = active.load (std::memory_order_acquire);
             position = 0; recordPosition = 0; generation = 1; canUndo = false; fadeGain = 0;
             const auto& storage = *slots[next];
             state.store (static_cast<int> (storage.length.load() > 1 ? (storage.resume ? LooperState::playing : LooperState::stopped) : LooperState::empty));
             pendingCommand = LooperCommand::none; pending.store (false); progress.store (0);
             recordBeats = recordGoal = countdown = 0; waiting = false;
-            pendingSlot.store (-1, std::memory_order_release);
+            active.store (next, std::memory_order_release);
+            freeSlots.fetch_or (1u << previous, std::memory_order_release);
         }
     }
     AudioSnapshot snapshot()
     {
         std::lock_guard<std::mutex> lock (archiveMutex);
-        int slot;
-        do { slot = pendingSlot.load (std::memory_order_acquire); if (slot < 0) slot = active.load (std::memory_order_acquire); reader.store (slot, std::memory_order_release); }
-        while (slot != active.load (std::memory_order_acquire) && slot != pendingSlot.load (std::memory_order_acquire));
+        // The archive lock prevents replacement while copying. latestSlot also
+        // covers the instant between the audio thread claiming and activating it.
+        const auto slot = latestSlot.load (std::memory_order_acquire);
         AudioSnapshot result; result.sampleRate = sampleRate;
         const auto* data = slots[slot].get();
         if (data != nullptr)
@@ -806,17 +807,21 @@ public:
             const auto length = data->length.load (std::memory_order_acquire);
             for (auto& c : result.audio) c.resize (static_cast<std::size_t> (length));
             for (int i = 0; i < length; ++i) for (int c = 0; c < 2; ++c) result.audio[c][i] = data->read (c, i);
-            const auto st = currentState(); result.playing = slot == pendingSlot.load() ? data->resume : st == LooperState::playing || st == LooperState::overdubbing || st == LooperState::recording;
+            const auto st = currentState(); result.playing = slot != active.load (std::memory_order_acquire) ? data->resume : st == LooperState::playing || st == LooperState::overdubbing || st == LooperState::recording;
         }
-        reader.store (-1, std::memory_order_release); return result;
+        return result;
     }
     bool restore (const AudioSnapshot& audio)
     {
         std::lock_guard<std::mutex> lock (archiveMutex);
-        if (pendingSlot.load (std::memory_order_acquire) >= 0 || audio.sampleRate <= 0 || audio.audio[0].size() != audio.audio[1].size()) return false;
+        if (audio.sampleRate <= 0 || audio.audio[0].size() != audio.audio[1].size()) return false;
+        // Queue the newest archive even before the host's first audio block.
+        // A slot stays owned while queued, being claimed, or active. Four slots
+        // leave room for a replacement during the audio thread's handoff.
+        const auto available = freeSlots.load (std::memory_order_acquire);
         int target = 0;
-        while (target == active.load (std::memory_order_acquire) || target == reader.load()) ++target;
-        if (target >= 3) return false;
+        while (target < 4 && (available & (1u << target)) == 0) ++target;
+        if (target == 4) return false;
         auto storage = std::make_unique<Storage> (static_cast<int> (std::ceil (sampleRate * 60.0)));
         const auto count = std::min (storage->capacity, static_cast<int> (audio.audio[0].size() * sampleRate / audio.sampleRate));
         for (int i = 0; i < count; ++i)
@@ -827,8 +832,12 @@ public:
             for (int c = 0; c < 2; ++c) storage->base[c][i].store (lerp (audio.audio[c][a], audio.audio[c][b], static_cast<float> (source - a)));
         }
         storage->length.store (count); storage->resume = audio.playing;
+        freeSlots.fetch_and (~(1u << target), std::memory_order_acq_rel);
         slots[target] = std::move (storage);
-        pendingSlot.store (target, std::memory_order_release); return true;
+        latestSlot.store (target, std::memory_order_release);
+        const auto replaced = pendingSlot.exchange (target, std::memory_order_acq_rel);
+        if (replaced >= 0) freeSlots.fetch_or (1u << replaced, std::memory_order_release);
+        return true;
     }
     void request (LooperCommand command) noexcept
     {
@@ -986,8 +995,9 @@ private:
         else if (st == LooperState::playing) { if (generation < 65535) { ++generation; data.layers[generation].store (true); canUndo = false; state.store (static_cast<int> (LooperState::overdubbing)); } }
         else { stopping = false; state.store (static_cast<int> (LooperState::playing)); }
     }
-    std::array<std::unique_ptr<Storage>, 3> slots;
-    std::atomic<int> active { 0 }, pendingSlot { -1 }, reader { -1 };
+    std::array<std::unique_ptr<Storage>, 4> slots;
+    std::atomic<unsigned> freeSlots { 0b1110u };
+    std::atomic<int> active { 0 }, pendingSlot { -1 }, latestSlot { 0 };
     std::mutex archiveMutex;
     std::array<LooperCommand, 64> commands {};
     std::atomic<std::size_t> commandRead { 0 }, commandWrite { 0 };
