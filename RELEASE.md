@@ -2,7 +2,7 @@
 
 ## Current status
 
-Version **0.3.8** contains the approved Details drawer, reverb audition, tuning alignment and instance-copy fixes on the 0.3.7 sound engine. This release pass builds universal macOS VST3/AU; the latest shared Windows package remains 0.3.7. See [VERIFICATION.md](VERIFICATION.md) for build, installation and host-test results.
+Version **0.3.9 beta** adds Feedback decay, value-driven knob underlights and aligned header artwork, alongside the 0.3.8 Details drawer, reverb audition and instance-copy fixes. It retains the 0.3.7/0.3.8 engine behavior with Feedback at 100%. Universal macOS VST3/AU is built, installed and packaged locally; matching Windows x64 artifacts are produced by the main-branch workflow. See [VERIFICATION.md](VERIFICATION.md) for platform build, installation and host-test results.
 
 The repository includes macOS and Windows build jobs that produce unsigned development installers. Public release signing, notarization, clean-machine installation, upgrades, and native host testing remain release checks. Generated bundles and installers are excluded from source control.
 
