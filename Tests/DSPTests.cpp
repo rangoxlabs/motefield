@@ -705,6 +705,45 @@ void testScheduledRecording()
     std::cout<<"Recording timing passed: exact four-bar count-in capture, host stopped/restart, 3/4, 1/4, 1/8, cancel, tempo change, overdub and legacy beat quantize.\n";
 }
 
+void testFeedbackDecay()
+{
+    const auto render = [] (motefield::Mode mode, float feedback)
+    {
+        constexpr int rate=16000, block=128;
+        motefield::Engine e; e.prepare(rate,block,2);
+        motefield::EngineParameters p; p.mode=mode;p.feedback=feedback;p.repeats=.6f;
+        p.mix=1.f;p.space=0.f;p.density=.74f;p.shape=.45f;p.bpm=120;p.division=2;
+        std::array<float,block> input{},left{},right{};
+        const float* in[]{input.data(),input.data()};float* out[]{left.data(),right.data()};
+        std::array<double,2> energy{};
+        for(int pos=0;pos<rate*5;pos+=block)
+        {
+            for(int i=0;i<block;++i)
+            {
+                const auto t=double(pos+i)/rate;
+                input[i]=t<.12?float(.4*std::sin(twoPi*220*t)*std::min(1.,t*1000)*std::exp(-t*18)):0.f;
+            }
+            watchingAudioAllocations=true;e.process(in,out,2,block,p);watchingAudioAllocations=false;
+            for(int i=0;i<block;++i)
+            {
+                require(std::isfinite(left[i])&&std::isfinite(right[i]),"feedback produced invalid output");
+                if(pos+i<rate)energy[0]+=left[i]*left[i]+right[i]*right[i];
+                if(pos+i>=rate*2)energy[1]+=left[i]*left[i]+right[i]*right[i];
+            }
+        }
+        return energy;
+    };
+    for(auto mode:{motefield::Mode::ladder,motefield::Mode::pluck,motefield::Mode::grid})
+    {
+        const auto full=render(mode,1.f),middle=render(mode,.6f),low=render(mode,0.f);
+        std::cout<<"Feedback mode "<<int(mode)<<" early "<<full[0]<<","<<middle[0]<<","<<low[0]
+                 <<" tail "<<full[1]<<","<<middle[1]<<","<<low[1]<<"\n";
+        require(low[0]>.00001,"zero feedback removed the initial effect");
+        require(full[1]>.00001 && middle[1]<full[1]*.5 && low[1]<full[1]*.01,"feedback failed to reduce late repeats");
+    }
+    require(audioAllocations==0,"feedback allocated on the audio thread");
+}
+
 void testConcurrentLoopRestore()
 {
     motefield::Engine engine;engine.prepare(8000,64,2);
@@ -740,6 +779,8 @@ void testConcurrentLoopRestore()
 
 int main (int argc, char** argv)
 {
+    testFeedbackDecay();
+    if(argc>1 && std::string(argv[1])=="--feedback-only")return 0;
     testConcurrentLoopRestore();
     if(argc>1 && std::string(argv[1])=="--restore-only")return 0;
     testScheduledRecording();

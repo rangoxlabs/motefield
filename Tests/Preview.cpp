@@ -228,7 +228,9 @@ void checkPresetsAndAutomation (MoteFieldAudioProcessor& processor, const juce::
     {
         processor.setParameterValue ("fieldPitch", -16.25f); processor.setParameterValue ("tuningReference", 432);
         processor.setParameterValue ("fieldPosition", .85f); processor.setParameterValue ("fieldSplit", .9f);
+        processor.setParameterValue("feedback",.2f);
         processor.applyFactoryPreset (i);
+        require(processor.parameters.getRawParameterValue("feedback")->load()==1.f,"factory preset inherited feedback trim");
         const float pitches[] { 7,12,-12,3,.06f };
         require (std::abs (processor.parameters.getRawParameterValue ("fieldPitch")->load() - (i < 32 ? 0.f : pitches[i-32])) < .011f, "factory pitch leaked between patches");
         require (processor.parameters.getRawParameterValue ("tuningReference")->load() == 440.f, "factory reference is not 440 Hz");
@@ -244,6 +246,7 @@ void checkPresetsAndAutomation (MoteFieldAudioProcessor& processor, const juce::
     processor.setParameterValue (looperOrder, 1.f);
     processor.setParameterValue (modDepth, .000001f);
     processor.setParameterValue ("width", 1.63f);
+    processor.setParameterValue ("feedback", .63f);
     processor.setParameterValue ("fieldPitch", 7.06f); processor.setParameterValue ("tuningReference", 442.f);
     require (processor.saveUserPreset ("../escape", false, directory).failed(), "preset filename escaped its folder");
     require (processor.saveUserPreset ("CON", false, directory).failed(), "Windows reserved preset name accepted");
@@ -264,6 +267,7 @@ void checkPresetsAndAutomation (MoteFieldAudioProcessor& processor, const juce::
     require (processor.parameters.getRawParameterValue (freeze)->load() == 1.f && processor.parameters.getRawParameterValue (bypass)->load() == 1.f, "preset changed Hold or Bypass");
     require (std::abs(processor.parameters.getRawParameterValue("width")->load()-1.63f)<.001f,"width did not round trip in preset");
     require (std::abs(processor.parameters.getRawParameterValue("fieldPitch")->load()-7.06f)<.011f && processor.parameters.getRawParameterValue("tuningReference")->load()==442.f,"user tuning did not round trip");
+    require(std::abs(processor.parameters.getRawParameterValue("feedback")->load()-.63f)<.001f,"feedback did not round trip in preset");
     require (MoteFieldAudioProcessor::userPresetFiles (directory).size() == 1, "saved preset discovery failed");
     juce::MemoryBlock saved;
     processor.getStateInformation (saved);
@@ -282,15 +286,16 @@ void checkPresetsAndAutomation (MoteFieldAudioProcessor& processor, const juce::
     for (auto* child = oldPreset->getFirstChildElement(); child != nullptr;)
     {
         auto* next = child->getNextElement();
-        if (juce::StringArray {"tuningReference","loopRecordStart","loopCountIn","loopLength"}.contains(child->getStringAttribute("id"))) oldPreset->removeChildElement(child,true);
+        if (juce::StringArray {"feedback","tuningReference","loopRecordStart","loopCountIn","loopLength"}.contains(child->getStringAttribute("id"))) oldPreset->removeChildElement(child,true);
         child = next;
     }
     auto legacyFile=directory.getChildFile("legacy-036.motefield"); oldPreset->writeTo(legacyFile);
     require(processor.loadUserPreset(legacyFile).wasOk(),"0.3.6 user preset rejected");
+    require(processor.parameters.getRawParameterValue("feedback")->load()==1.f,"legacy preset inherited feedback trim");
     require(processor.parameters.getRawParameterValue("tuningReference")->load()==440.f && std::abs(processor.parameters.getRawParameterValue("fieldPitch")->load()-7.06f)<.011f,"legacy preset lost pitch or inherited reference");
 
 
-    require (processor.getParameters().size() == 66, "host parameter count changed unexpectedly");
+    require (processor.getParameters().size() == 67, "host parameter count changed unexpectedly");
     std::set<juce::String> ids;
     for (auto* parameter : processor.getParameters())
     {
@@ -329,7 +334,7 @@ void checkPresetsAndAutomation (MoteFieldAudioProcessor& processor, const juce::
     trigger (3); require (processor.getLooperState() == motefield::LooperState::stopped, "host Stop trigger failed");
     trigger (5); require (processor.getLooperState() == motefield::LooperState::empty, "host Erase trigger failed");
     processor.setParameterValue (freeze, 0.f);processor.setParameterValue (bypass, 0.f);
-    std::cout << "Preset/automation checks passed: 37 factory presets, all 11 modes, disk round trip, overwrite protection, invalid-file rejection, session identity, 66 host parameters and looper triggers.\n";
+    std::cout << "Preset/automation checks passed: 37 factory presets, all 11 modes, disk round trip, overwrite protection, invalid-file rejection, session identity, 67 host parameters and looper triggers.\n";
 }
 void checkInstanceCopy()
 {
@@ -467,6 +472,28 @@ int main (int argc, char** argv)
         setenv ("MOTEFIELD_APPEARANCE_FILE", appearanceFile.getFullPathName().toRawUTF8(),1);
         #endif
         MoteFieldAudioProcessor processor;
+        if (argc > 2 && juce::String (argv[2]) == "--knob-lights-only")
+        {
+            processor.prepareToPlay(48000,400); processor.applyFactoryPreset(17);
+            std::unique_ptr<MoteFieldAudioProcessorEditor> editor(static_cast<MoteFieldAudioProcessorEditor*>(processor.createEditor()));
+            editor->setVisible(true); editor->setSize(1620,972);
+            for(const auto amount : {0.f,.5f,1.f})
+            {
+                for(const auto* id : {"density","shape","cutoff","mix","time","repeats","feedback","space","width","looperLevel"})
+                {
+                    auto* slider=dynamic_cast<juce::Slider*>(find(*editor,id));
+                    require(slider!=nullptr,"light preview knob missing");
+                    slider->setValue(slider->proportionOfLengthToValue(amount),juce::sendNotificationSync);
+                }
+                editor->refreshDisplay();
+                saveImage(*editor,destination.getChildFile("knob-lights-"+juce::String(juce::roundToInt(amount*100.f))+".png"));
+            }
+            processor.applyFactoryPreset(17); editor->refreshDisplay();
+            saveImage(*editor,destination.getChildFile("knob-lights-preset.png"));
+            checkAppearance(*editor,destination);
+            std::cout << "Knob illumination preview captured at minimum, midpoint and maximum travel.\n";
+            return 0;
+        }
         if (argc > 2 && juce::String (argv[2]) == "--appearance-only")
         {
             processor.prepareToPlay(48000,400); processor.applyFactoryPreset(17);
@@ -653,15 +680,16 @@ int main (int argc, char** argv)
         require(!find(*editor,"wetSolo")->getBounds().intersects(find(*editor,"levelMatch")->getBounds()),"monitor buttons overlap");
         processor.setParameterValue("width",1.7f);
         processor.setParameterValue("reverbSolo",1.f);
+        processor.setParameterValue("feedback",.2f);
         auto oldState = processor.parameters.copyState();
         for (int i = oldState.getNumChildren() - 1; i >= 0; --i)
-            if (juce::StringArray { motefield::parameter::bypass, "width", "wetSolo", "levelMatch", "reverbSolo", "tuningReference", "loopRecordStart", "loopCountIn", "loopLength" }.contains(oldState.getChild (i).getProperty ("id").toString()))
+            if (juce::StringArray { motefield::parameter::bypass, "width", "wetSolo", "levelMatch", "reverbSolo", "feedback", "tuningReference", "loopRecordStart", "loopCountIn", "loopLength" }.contains(oldState.getChild (i).getProperty ("id").toString()))
                 oldState.removeChild (i, nullptr);
         juce::MemoryBlock oldBytes;
         juce::AudioProcessor::copyXmlToBinary (*oldState.createXml(), oldBytes);
         processor.setStateInformation (oldBytes.getData(), static_cast<int> (oldBytes.getSize()));
         require (value (motefield::parameter::bypass) < .5f, "v0.1 state did not clear a newer bypass setting");
-        require(value("width")==1.f && value("wetSolo")==0.f && value("levelMatch")==0.f && value("reverbSolo")==0.f,"legacy session failed neutral monitor defaults");
+        require(value("width")==1.f && value("wetSolo")==0.f && value("levelMatch")==0.f && value("reverbSolo")==0.f && value("feedback")==1.f,"legacy session failed neutral monitor defaults");
         require(value("tuningReference")==440.f && value("loopRecordStart")==0.f && value("loopCountIn")==0.f && value("loopLength")==0.f,"legacy session failed new tuning/record defaults");
         processor.setParameterValue (motefield::parameter::freeze, 0.0f);
         processor.setParameterValue (motefield::parameter::bypass, 0.0f);
@@ -674,7 +702,7 @@ int main (int argc, char** argv)
         click (*editor, "stop"); processSilence();
         require (processor.getLooperState() == motefield::LooperState::stopped, "stop control failed");
         {
-            const std::set<juce::String> randomized { "mode","variation","density","repeats","shape","cutoff","mix","space","modDepth","modRate","resonance","division","reverbStyle","reverse" };
+            const std::set<juce::String> randomized { "mode","variation","density","repeats","feedback","shape","cutoff","mix","space","modDepth","modRate","resonance","division","reverbStyle","reverse" };
             std::vector<std::pair<juce::String,float>> protectedValues;
             for(auto* parameter:processor.getParameters())
                 if(auto* ranged=dynamic_cast<juce::RangedAudioParameter*>(parameter);ranged && !randomized.count(ranged->paramID))
@@ -756,6 +784,22 @@ int main (int argc, char** argv)
         click (*editor, "details");
         require(value("reverbSolo")==0.f && value("mix")==mixBefore,"closing Details did not end audition or changed Mix");
         editor->setSize (1000, 600);
+        for (const auto width : {1000,1620})
+        {
+            editor->setSize(width,width*3/5);
+            juce::Rectangle<int> previous;
+            for(const auto* id : {"time","repeats","feedback","space","width","looperLevel"})
+            {
+                auto* slider=find(*editor,id);
+                require(slider!=nullptr,"lower-row control missing");
+                const auto bounds=editor->getLocalArea(slider,slider->getLocalBounds());
+                require(editor->getLocalBounds().contains(bounds),"lower-row control clipped");
+                require(previous.isEmpty() || previous.getRight()<bounds.getX(),"lower-row controls overlap or are out of order");
+                previous=bounds;
+            }
+        }
+        saveImage (*editor, destination.getChildFile ("motefield-full.png"));
+        editor->setSize(1000,600);
         saveImage (*editor, destination.getChildFile ("motefield-small.png"));
         for (int width : {1000, 1620})
         {

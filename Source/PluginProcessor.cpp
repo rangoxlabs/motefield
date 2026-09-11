@@ -115,6 +115,7 @@ void MoteFieldAudioProcessor::processAudio (juce::AudioBuffer<float>& buffer, in
     values.variation = juce::jlimit (0, 3, static_cast<int> (std::lround (load (motefield::parameter::variation))));
     values.density = load (motefield::parameter::density);
     values.repeats = load (motefield::parameter::repeats);
+    values.feedback = load ("feedback");
     values.shape = load (motefield::parameter::shape);
     values.division = juce::jlimit (0, 8, static_cast<int> (std::lround (load (motefield::parameter::division))));
     values.bpm = load (motefield::parameter::tempo);
@@ -413,6 +414,9 @@ juce::AudioProcessorValueTreeState::ParameterLayout MoteFieldAudioProcessor::cre
     layout.add (std::make_unique<juce::AudioParameterChoice> (ParameterID { "loopCountIn", 6 }, "Recording count-in", juce::StringArray { "Off", "One bar" }, 0));
     layout.add (std::make_unique<juce::AudioParameterChoice> (ParameterID { "loopLength", 6 }, "Recording length", juce::StringArray { "Free (60 sec max)", "1 bar", "2 bars", "4 bars", "8 bars" }, 0));
     layout.add (std::make_unique<juce::AudioParameterBool> (ParameterID { "reverbSolo", 7 }, "Reverb Solo", false));
+    layout.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "feedback", 8 }, "Feedback",
+        juce::NormalisableRange<float> { 0.f, 1.f, .001f }, 1.f,
+        juce::AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int) { return juce::String(juce::roundToInt(v*100.f)) + "%"; })));
     return layout;
 }
 
@@ -449,6 +453,7 @@ void MoteFieldAudioProcessor::randomizeSound (juce::int64 seed)
     setParameterValue(variation,static_cast<float>(random.nextInt(4)));
     setParameterValue(density,range(.22f,.88f));
     setParameterValue(repeats,range(.20f,.76f));
+    setParameterValue("feedback",range(.45f,.88f));
     setParameterValue(shape,range(.08f,.92f));
     setParameterValue(cutoff,std::exp(range(std::log(1800.f),std::log(18000.f))));
     setParameterValue(mix,range(.30f,.72f));
@@ -523,6 +528,7 @@ void MoteFieldAudioProcessor::applyFactoryPreset (int index)
     setParameterValue (variation, static_cast<float> (preset.variant));
     setParameterValue (density, preset.activity);
     setParameterValue (repeats, preset.repeat);
+    setParameterValue ("feedback", 1.f);
     setParameterValue (shape, preset.contour);
     setParameterValue (cutoff, preset.filter);
     setParameterValue (mix, preset.wet);

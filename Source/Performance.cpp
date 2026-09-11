@@ -60,7 +60,7 @@ bool decode (const juce::MemoryBlock& bytes, motefield::AudioSnapshot& snapshot)
 
 const std::vector<juce::String>& MoteFieldAudioProcessor::extendedParameterIds()
 {
-    static const auto ids = [] { std::vector<juce::String> result; for (const auto& c : controls) result.emplace_back (c.id); for (const auto* id : { "width", "wetSolo", "levelMatch", "tuningReference", "loopRecordStart", "loopCountIn", "loopLength" }) result.emplace_back (id); return result; }();
+    static const auto ids = [] { std::vector<juce::String> result; for (const auto& c : controls) result.emplace_back (c.id); for (const auto* id : { "width", "wetSolo", "levelMatch", "tuningReference", "loopRecordStart", "loopCountIn", "loopLength", "reverbSolo", "feedback" }) result.emplace_back (id); return result; }();
     return ids;
 }
 void MoteFieldAudioProcessor::addPerformanceParameters (juce::AudioProcessorValueTreeState::ParameterLayout& layout)

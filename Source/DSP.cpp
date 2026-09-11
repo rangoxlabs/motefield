@@ -453,7 +453,7 @@ public:
             }
         }
 
-        const auto feedback = 0.08f + parameters.repeats * 0.78f;
+        const auto feedback = (0.08f + parameters.repeats * 0.78f) * clamp(parameters.feedback,0.f,1.f);
         const auto cross = parameters.mode == Mode::smear ? 0.22f + 0.2f * parameters.shape : 0.08f;
         ring.write (saturate (inputL + feedback * (feedbackL * (1.0f - cross) + feedbackR * cross)),
                     saturate (inputR + feedback * (feedbackR * (1.0f - cross) + feedbackL * cross)));
@@ -1056,6 +1056,7 @@ struct Engine::Impl
         sequenceStep = 0;
         feedbackL = feedbackR = 0.0f;
         widthSmoothing = 1.f - std::exp(-1.f / static_cast<float>(sampleRate * .02));
+        smoothedFeedback = 1.f;
         smoothedWidth = 1.f; smoothedSolo = smoothedReverbSolo = 0.f; matchGain = smoothedMatch = 1.f;
         matchEnabled = matchLearning = false; matchSamples = 0; matchInput = matchOutput = 0.;
         smoothedMix = 0.5f;
@@ -1270,7 +1271,17 @@ struct Engine::Impl
             if (mode == Mode::smear) duration = static_cast<float> (grid * (0.6 + parameters.repeats * 1.8));
 
             duration = clamp (duration, 24.0f, static_cast<float> (sampleRate * 4.0));
-            const auto gain = (mode == Mode::veil ? 0.42f : 0.66f) / std::sqrt (static_cast<float> (voices));
+            auto gain = (mode == Mode::veil ? 0.42f : 0.66f) / std::sqrt (static_cast<float> (voices));
+            // These modes revisit a detected note rather than a moving delay tap.
+            // Fade its later visits, retaining the first subdivision at full level.
+            // Unity is the exact pre-control behavior; Hold remains a sustain action.
+            if (smoothedFeedback < 1.f && ! parameters.freeze
+                && (mode == Mode::ladder || mode == Mode::pluck)
+                && readDelay == recentOnsetDelay(eventStep + voice))
+            {
+                const auto repeatsElapsed = std::max(0.0,(readDelay-grid)/grid);
+                gain *= static_cast<float>(std::pow(std::max(.000001f,smoothedFeedback),repeatsElapsed));
+            }
             const auto pan = voices == 1 ? random.bipolar() * 0.25f
                                          : -0.8f + 1.6f * static_cast<float> (voice) / static_cast<float> (voices - 1);
             auto* grain = findFreeGrain();
@@ -1355,6 +1366,8 @@ struct Engine::Impl
             fieldPosition += friction * (parameters.fieldPosition - fieldPosition);
             fieldPitch += friction * (parameters.fieldPitch - fieldPitch);
             fieldStretch += friction * (parameters.fieldStretch - fieldStretch);
+            smoothedFeedback += widthSmoothing * (clamp(parameters.feedback,0.f,1.f)-smoothedFeedback);
+            material.feedback = smoothedFeedback;
             material.fieldPosition = fieldPosition;
             material.fieldPitch = fieldPitch;
             material.fieldStretch = fieldStretch * (parameters.magnetMode == 0 ? 1.f - magnetic * .65f : 1.f);
@@ -1371,7 +1384,7 @@ struct Engine::Impl
 
             if (! parameters.freeze)
             {
-                const auto feedbackAmount = parameters.repeats * 0.48f;
+                const auto feedbackAmount = parameters.repeats * 0.48f * smoothedFeedback;
                 capture.write (saturate (inputL + feedbackL * feedbackAmount),
                                saturate (inputR + feedbackR * feedbackAmount));
             }
@@ -1527,7 +1540,7 @@ struct Engine::Impl
             parameters.density, parameters.repeats, parameters.shape, parameters.cutoffHz, parameters.space,
             parameters.resonance, parameters.modulationDepth, parameters.modulationRateHz,
             static_cast<float>(parameters.division), static_cast<float>(parameters.reverbStyle),
-            parameters.fieldPitch, parameters.fieldStretch, parameters.reverse ? 1.f : 0.f, parameters.looperLevel, parameters.reverbSolo ? 1.f : 0.f };
+            parameters.fieldPitch, parameters.fieldStretch, parameters.reverse ? 1.f : 0.f, parameters.looperLevel, parameters.reverbSolo ? 1.f : 0.f, parameters.feedback };
         if (parameters.levelMatch && (!matchEnabled || settings != matchSettings))
         { matchLearning = true; matchSamples = 0; matchInput = matchOutput = 0.; }
         if (!parameters.levelMatch) { matchLearning = false; matchGain = 1.f; }
@@ -1756,12 +1769,12 @@ struct Engine::Impl
     float feedbackL = 0.0f;
     float feedbackR = 0.0f;
     float grainNormalizer = 1.f;
-    float widthSmoothing = .001f;
+    float widthSmoothing = .001f, smoothedFeedback = 1.f;
     float smoothedWidth = 1.f, smoothedSolo = 0.f, smoothedReverbSolo = 0.f, matchGain = 1.f, smoothedMatch = 1.f;
     bool matchEnabled = false, matchLearning = false;
     std::uint64_t matchSamples = 0;
     double matchInput = 0., matchOutput = 0.;
-    std::array<float, 21> matchSettings {};
+    std::array<float, 22> matchSettings {};
     float smoothedMix = 0.5f;
     float smoothedCutoff = 18000.0f;
     float smoothedOutput = 1.0f;

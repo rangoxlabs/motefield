@@ -98,6 +98,9 @@ void MoteFieldLookAndFeel::drawRotarySlider (juce::Graphics& g, int x, int y, in
     const auto size=static_cast<float>(juce::jmin(width,height));
     const juce::Point<float> centre(x+width*.5f,y+height*.5f);
     const bool selector=slider.getComponentID()=="mode-selector";
+    // Follow the displayed travel, including skewed frequency ranges and automation.
+    // The mode selector is categorical, so its selected-mode beacon stays constant.
+    const auto illumination = .07f + .93f * std::pow(juce::jlimit(0.f,1.f,position),.85f);
     const auto radius=size*(selector?.35f:.405f),angle=start+position*(end-start);
     if(selector)
     {
@@ -114,20 +117,21 @@ void MoteFieldLookAndFeel::drawRotarySlider (juce::Graphics& g, int x, int y, in
     else
     {
         const auto origin=centre.translated(0,size*.40f);
-        g.setGradientFill(juce::ColourGradient(cyan.withAlpha(.42f),origin.x,origin.y,cyan.withAlpha(0.f),origin.x+size*.43f,origin.y,true));
+        g.setGradientFill(juce::ColourGradient(cyan.withAlpha(.42f*illumination),origin.x,origin.y,cyan.withAlpha(0.f),origin.x+size*.43f,origin.y,true));
         g.fillEllipse(juce::Rectangle<float>(size*.96f,size*.24f).withCentre(origin));
         juce::Path light;light.addCentredArc(centre.x,centre.y+size*.065f,radius,radius,0,pi*.30f,pi*1.70f,true);
-        for(int glow=8;glow>0;--glow){g.setColour(cyan.withAlpha(.023f));g.strokePath(light,juce::PathStrokeType(glow*size*.015f));}
-        g.setColour(cyan.brighter(.15f));g.strokePath(light,juce::PathStrokeType(size*.015f));
+        for(int glow=8;glow>0;--glow){g.setColour(cyan.withAlpha(.023f*illumination));g.strokePath(light,juce::PathStrokeType(glow*size*.015f));}
+        g.setColour(cyan.brighter(.15f).withAlpha(illumination));g.strokePath(light,juce::PathStrokeType(size*.015f));
     }
     const auto knob=juce::ImageCache::getFromMemory(BinaryData::AcidKnobv1_png,BinaryData::AcidKnobv1_pngSize);
     g.setImageResamplingQuality(juce::Graphics::highResamplingQuality);
+    g.setOpacity(1.f); // Only the underlight dims; the hardware face stays opaque.
     g.drawImage(knob,juce::Rectangle<float>(size*(selector?.80f:.92f),size*(selector?.80f:.92f)).withCentre(centre.translated(0,size*(selector?.07f:.08f))));
     if(!selector)
     {
         juce::Path lip;lip.addCentredArc(centre.x,centre.y+size*.045f,size*.435f,size*.435f,0,pi*.42f,pi*1.58f,true);
-        for(int halo=7;halo>0;--halo){g.setColour(cyan.withAlpha(.055f));g.strokePath(lip,juce::PathStrokeType(size*.012f*halo));}
-        g.setColour(cyan.interpolatedWith(juce::Colours::white,.55f));g.strokePath(lip,juce::PathStrokeType(size*.008f));
+        for(int halo=7;halo>0;--halo){g.setColour(cyan.withAlpha(.055f*illumination));g.strokePath(lip,juce::PathStrokeType(size*.012f*halo));}
+        g.setColour(cyan.interpolatedWith(juce::Colours::white,.55f).withAlpha(illumination));g.strokePath(lip,juce::PathStrokeType(size*.008f));
     }
     juce::Path pointer;pointer.startNewSubPath(centre.getPointOnCircumference(radius*.58f,angle));pointer.lineTo(centre.getPointOnCircumference(radius*.79f,angle));
     g.setColour(juce::Colour(0xff202422));g.strokePath(pointer,juce::PathStrokeType(size*.026f,juce::PathStrokeType::curved,juce::PathStrokeType::rounded));
@@ -657,7 +661,8 @@ MoteFieldAudioProcessorEditor::MoteFieldAudioProcessorEditor (MoteFieldAudioProc
     using namespace motefield::parameter;
     setLookAndFeel (&lookAndFeel);
     setOpaque (true);
-    rangoLogo = juce::ImageCache::getFromMemory (BinaryData::RangoLogo_png, BinaryData::RangoLogo_pngSize);
+    // Place the artwork by its visible mark, not the transparent square canvas.
+    rangoLogo = juce::ImageCache::getFromMemory (BinaryData::RangoLogo_png, BinaryData::RangoLogo_pngSize).getClippedImage({167,239,720,468});
     modeSelector.setSliderStyle (juce::Slider::RotaryVerticalDrag);
     modeSelector.setRotaryParameters (pi * 4.f / 3.f, pi * 3.f, true);
     modeSelector.setTextBoxStyle (juce::Slider::NoTextBox, false, 0, 0);
@@ -686,6 +691,7 @@ MoteFieldAudioProcessorEditor::MoteFieldAudioProcessorEditor (MoteFieldAudioProc
     addKnob ("RESONANCE", resonance, "Resonance: emphasizes frequencies around the filter cutoff.");
     addKnob ("OUTPUT", output, "Output: trims the effect output in decibels.");
     addKnob ("WIDTH", "width", "Stereo Width: 0% mono, 100% original; above 100% adds gentle widening, capped at +10% side gain. Printed into POST recordings; playback keeps its recorded width.");
+    addKnob ("FEEDBACK", "feedback", "Feedback: lowers regeneration and fades remembered notes. 100% preserves the preset's original sustain; lower values give shorter tails. Space and Hold have their own tails.");
     for (std::size_t i = 0; i < modeButtons.size(); ++i)
     {
         auto& button = modeButtons[i];
@@ -1122,8 +1128,8 @@ void MoteFieldAudioProcessorEditor::resized()
     if(!hardwarePanel.isValid()||hardwarePanel.getHeight()!=height)hardwarePanel=makeHardwarePanel(height,lookAndFeel.colours);
     for(auto& b:modeButtons)b.getProperties().set("glassDark",true);
     for(int i=0;i<4;++i)place(*knobs[i],443+i*201,79,116,133);
-    for(int i=4;i<7;++i)place(*knobs[i],281+(i-4)*154,574,116,127);
-    place(*knobs[12],743,574,116,127); place(*knobs[7],897,574,116,127);
+    const std::array<int,6> lowerKnobs {4,5,13,6,12,7};
+    for(int i=0;i<6;++i)place(*knobs[lowerKnobs[i]],269+i*130,574,116,127);
     if(performancePanel)performancePanel->setBounds(getLocalBounds().reduced(14));
     if(settingsPanel)settingsPanel->setBounds(getLocalBounds());
     place(modeSelector,159,276,186,186);
@@ -1165,8 +1171,8 @@ void MoteFieldAudioProcessorEditor::paint(juce::Graphics& g)
 {
     const auto p=appearance::read(*this);const auto s=static_cast<float>(getWidth())/1620.f;g.addTransform(juce::AffineTransform::scale(s).translated(0,-scrollOffset));g.drawImageAt(hardwarePanel,0,0);
     {juce::Graphics::ScopedSaveState saved(g);const auto drive=motionButton.getToggleState()?0.f:logoDrive;
-     g.addTransform(juce::AffineTransform::scale(1.f+drive*.045f,1.f-drive*.025f,132.f,56.f));g.setColour(p.ink);g.drawImage(rangoLogo,juce::Rectangle<float>(80,7,113,99),juce::RectanglePlacement::centred,true);}
-    text(g,"MoteField",{192,27,350,40},33,p.ink,false);text(g,"by Rango Labs",{192,66,280,23},17,p.muted);
+     g.addTransform(juce::AffineTransform::scale(1.f+drive*.045f,1.f-drive*.025f,128.f,58.5f));g.setColour(p.ink);g.drawImage(rangoLogo,juce::Rectangle<float>(94,36,68,45),juce::RectanglePlacement::centred,true);}
+    text(g,"MoteField",{178,27,350,40},32,p.ink,false);text(g,"by Rango Labs",{178,65,280,21},16,p.muted);
     text(g,"Out",{1411,43,44,30},13,p.ink);
     const auto& f=fieldDisplay.currentFrame();const auto level=juce::jlimit(0.f,1.f,(juce::Decibels::gainToDecibels(f.outputLevel,-60.f)+48.f)/48.f);
     for(int i=0;i<18;++i){g.setColour(i<level*18?p.ink:p.line.withAlpha(.4f));g.fillRect(1455.f+i*5.2f,73.f-(i+5)*1.2f,3.6f,(i+5)*1.2f);}

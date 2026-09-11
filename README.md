@@ -6,7 +6,9 @@ The clear enclosure, sculpted knob rails, and Acid lighting surround a pearl fer
 
 ![MoteField interface](docs/images/motefield.png)
 
-**Current version: 0.3.8 development.** This update targets universal macOS AU/VST3. The latest shared Windows x64 VST3 test build remains 0.3.7. See [VERIFICATION.md](VERIFICATION.md) for checks and remaining host-specific validation.
+**Knob underlights** brighten progressively with each amount knob’s position, using the chosen accent color in light or dark mode. The effect selector keeps a steady selection light.
+
+**Current version: 0.3.9 beta.** Universal macOS AU/VST3 and Windows x64 VST3. See [VERIFICATION.md](VERIFICATION.md) for checks and remaining host-specific validation.
 
 ## Included effects
 
@@ -54,7 +56,8 @@ Select an effect by turning the mode dial or clicking its name. The pointer alig
 | **Filter** | Sets the low-pass cutoff. |
 | **Mix** | Sets the dry/effect balance. |
 | **Time** | Chooses a rhythmic subdivision when synced, or internal tempo in manual mode. |
-| **Repeats** | Extends grain duration and feedback, or delay feedback, depending on the mode. |
+| **Repeats** | Extends grain duration and sets the underlying regeneration, depending on the mode. |
+| **Feedback** | Reduces regeneration and fades later visits to remembered notes in Ladder and Pluck. 100% retains the original preset behavior; lower values shorten the repeats. Space and Hold have separate sustain behavior. |
 | **Space** | Sets the reverb amount. |
 | **Loop Level** | Sets the recorded phrase's contribution. |
 
@@ -110,18 +113,18 @@ These are global offsets added to each mode's own pitch behavior. User presets a
 
 The preset menu has **Factory** and **User** submenus. Choose from 37 factory starting points covering all eleven modes, or use **Save** to name the current sound. Replacing an existing user preset requires confirmation. An asterisk marks changes from the selected preset, and its name is retained with the DAW session.
 
-**Initialize sound** in the preset menu keeps the selected effect mode and loads a simple variation-A starting sound with modest Activity and Repeats, Mix at 40%, Width at 100%, and no added Space or Drift. Material, pitch, pattern and sidechain sound controls return to defaults. Timing/subdivision, output level, monitoring, Hold/Bypass, all looper settings, recorded audio, MIDI mappings and appearance are retained. The preset name becomes **Init - Orbit** (or the current mode). **Undo initialization** restores the previous sound and preset identity; loading, saving or randomizing a sound, or restoring a session, clears this one-step undo. Use **SAVE** to keep your initialized sound. POST recordings keep their captured sound; PRE recordings continue through the live effects.
+**Initialize sound** in the preset menu keeps the selected effect mode and loads a simple variation-A starting sound with modest Activity and Repeats, Mix at 40%, Feedback at 50%, Width at 100%, and no added Space or Drift. Material, pitch, pattern and sidechain sound controls return to defaults. Timing/subdivision, output level, monitoring, Hold/Bypass, all looper settings, recorded audio, MIDI mappings and appearance are retained. The preset name becomes **Init - Orbit** (or the current mode). **Undo initialization** restores the previous sound and preset identity; loading, saving or randomizing a sound, or restoring a session, clears this one-step undo. Use **SAVE** to keep your initialized sound. POST recordings keep their captured sound; PRE recordings continue through the live effects.
 
-**RANDOM**, beside the preset picker, creates a new sound across effect mode, variation, Activity, Shape, Filter, Mix, Repeats, Space, Drift, subdivision, reverb character, and FX reverse. It uses bounded starting ranges and sends parameter changes to the host. Recorded audio, looper settings, Hold, Bypass, tempo/sync, and output gain are retained. Click **SAVE** to keep the result as a user preset.
+**RANDOM**, beside the preset picker, creates a new sound across effect mode, variation, Activity, Shape, Filter, Mix, Repeats, Feedback, Space, Drift, subdivision, reverb character, and FX reverse. It uses bounded starting ranges and sends parameter changes to the host. Recorded audio, looper settings, Hold, Bypass, tempo/sync, and output gain are retained. Click **SAVE** to keep the result as a user preset.
 
 User presets are portable `.motefield` files stored in:
 
-- macOS: `~/Library/Application Support/Rango Labs/MoteField/Presets`
+- macOS: `~/Library/Rango Labs/MoteField/Presets`
 - Windows: `%APPDATA%/Rango Labs/MoteField/Presets`
 
-Use **Refresh user presets** after copying files into that folder. User presets save 54 sound, timing, routing, and performance settings, plus recorded phrase audio when present. Hold, Bypass, and transport gates are excluded. Presets containing a phrase replace the current phrase; sound-only presets retain it. Earlier version-1 and 0.3.6 version-2 preset files remain readable. Missing new controls receive defaults: A4 440 Hz, no count-in, free recording length and Follow loop quantize. Use 0.3.7 or later to open presets saved by this build. Factory presets retain the current timing/sync and looper configuration.
+Use **Refresh user presets** after copying files into that folder. User presets save 55 sound, timing, routing, and performance settings, plus recorded phrase audio when present. Hold, Bypass, and transport gates are excluded. Presets containing a phrase replace the current phrase; sound-only presets retain it. Earlier version-1 and 0.3.6 version-2 preset files remain readable. Missing new controls receive defaults: Feedback 100%, A4 440 Hz, no count-in, free recording length and Follow loop quantize. Use 0.3.9 or later to open presets saved by this build. Factory presets retain the current timing/sync and looper configuration.
 
-All **65 exposed parameters** support host automation, including Mode, Variation, Hold, Bypass, and six looper command triggers. UI edits notify the host, allowing automation recording where the DAW supports it. Tap writes Tempo and Host Sync; display preferences are not audio parameters.
+All **67 exposed parameters** support host automation, including Mode, Variation, Hold, Bypass, and six looper command triggers. UI edits notify the host, allowing automation recording where the DAW supports it. Tap writes Tempo and Host Sync; display preferences are not audio parameters.
 
 Looper triggers execute on each **0-to-1 or 1-to-0 transition**. Alternate values for repeated commands; a held value does not retrigger. Commands apply at the next processing block, and repeated edges of the same command within a block coalesce. Avoid simultaneous conflicting transport commands. DAW-specific automation behavior still needs host testing.
 

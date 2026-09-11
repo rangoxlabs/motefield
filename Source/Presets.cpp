@@ -57,7 +57,7 @@ void MoteFieldAudioProcessor::initializeSound()
     using namespace motefield::parameter;
     // Explicit sound controls only: never replace the whole processor state or loop.
     const juce::StringArray controls { variation, density, repeats, shape, cutoff, mix,
-        space, modDepth, modRate, resonance, reverbStyle, reverse, "width",
+        space, modDepth, modRate, resonance, reverbStyle, reverse, "width", "feedback",
         "viscosity", "cohesion", "tension", "fieldPosition", "fieldPitch", "fieldStretch",
         "fieldSplit", "magnetAmount", "magnetMode", "magnetAttack", "magnetRelease",
         "patternSeed", "patternLock", "patternSteps", "rhythmMutation", "pitchMutation",
@@ -98,6 +98,7 @@ void MoteFieldAudioProcessor::initializeSound()
         else if (id == repeats) value = start.repeat;
         else if (id == shape) value = start.contour;
         else if (id == mix) value = .40f;
+        else if (id == "feedback") value = .5f;
         else if (id == space || id == modDepth || id == resonance) value = 0.f;
         setParameterValue (id.toRawUTF8(), value);
     }
@@ -208,7 +209,7 @@ juce::Result MoteFieldAudioProcessor::loadUserPreset (const juce::File& file)
         if (const auto* ranged = dynamic_cast<const juce::RangedAudioParameter*> (parameter))
             if (isPresetParameter (ranged->paramID) && seen.count (ranged->paramID) == 0)
             {
-                if ((ranged->paramID == "width" || ranged->paramID == "tuningReference" || ranged->paramID == "loopRecordStart" || ranged->paramID == "loopCountIn" || ranged->paramID == "loopLength") || (document->getIntAttribute ("version") == 1 && std::find (extendedParameterIds().begin(), extendedParameterIds().end(), ranged->paramID) != extendedParameterIds().end()))
+                if ((ranged->paramID == "feedback" || ranged->paramID == "width" || ranged->paramID == "tuningReference" || ranged->paramID == "loopRecordStart" || ranged->paramID == "loopCountIn" || ranged->paramID == "loopLength") || (document->getIntAttribute ("version") == 1 && std::find (extendedParameterIds().begin(), extendedParameterIds().end(), ranged->paramID) != extendedParameterIds().end()))
                     values.emplace_back (parameters.getParameter (ranged->paramID), ranged->getDefaultValue());
                 else return juce::Result::fail ("This preset is incomplete. Your sound has not changed.");
             }

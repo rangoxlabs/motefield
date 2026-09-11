@@ -58,6 +58,7 @@ struct EngineParameters
     int variation = 0;
     float density = 0.42f;
     float repeats = 0.48f;
+    float feedback = 1.0f; // Retention trim: unity preserves existing preset regeneration.
     float shape = 0.52f;
     int division = 4;
     double bpm = 120.0;
