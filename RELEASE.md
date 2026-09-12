@@ -2,7 +2,7 @@
 
 ## Current status
 
-Version **0.3.9 beta** adds Feedback decay, value-driven knob underlights and aligned header artwork, alongside the 0.3.8 Details drawer, reverb audition and instance-copy fixes. It retains the 0.3.7/0.3.8 engine behavior with Feedback at 100%. Universal macOS VST3/AU is built, installed and packaged locally; matching Windows x64 artifacts are produced by the main-branch workflow. See [VERIFICATION.md](VERIFICATION.md) for platform build, installation and host-test results.
+Version **0.3.10 beta** adds automatic loop-boundary smoothing, non-destructive playback-region selection, adjustable crossfade and region-aware WAV export. Source recordings remain intact. It includes the 0.3.9 Feedback and lighting refinements on the preferred engine. See [VERIFICATION.md](VERIFICATION.md) for build, installation and platform checks.
 
 The repository includes macOS and Windows build jobs that produce unsigned development installers. Public release signing, notarization, clean-machine installation, upgrades, and native host testing remain release checks. Generated bundles and installers are excluded from source control.
 

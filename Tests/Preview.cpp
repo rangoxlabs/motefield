@@ -1,3 +1,4 @@
+#include "LoopPlayback.h"
 #include "PluginEditor.h"
 #include <iostream>
 #include <stdexcept>
@@ -152,7 +153,7 @@ void checkInitialization (MoteFieldAudioProcessor& processor, MoteFieldAudioProc
     const juce::StringArray retained { "mode", "division", "tempo", "sync", "output", "freeze", "bypass",
         "looperLevel", "looperSpeed", "looperReverse", "looperOrder", "loopQuantize", "loopContinuous",
         "loopRate", "loopFade", "loopFadeMode", "loopOnly", "loopRecordOrder", "burstGate",
-        "bypassTrails", "holdStyle", "wetSolo", "levelMatch", "reverbSolo", "loopRecordStart", "loopCountIn", "loopLength" };
+        "bypassTrails", "holdStyle", "wetSolo", "levelMatch", "reverbSolo", "loopStart", "loopEnd", "loopCrossfade", "loopSnap", "loopRecordStart", "loopCountIn", "loopLength" };
     const auto phrase = processor.loopData();
     require (phrase.getSize() > 17, "initialization test requires recorded audio");
     const auto transport = processor.getLooperState();
@@ -286,7 +287,7 @@ void checkPresetsAndAutomation (MoteFieldAudioProcessor& processor, const juce::
     for (auto* child = oldPreset->getFirstChildElement(); child != nullptr;)
     {
         auto* next = child->getNextElement();
-        if (juce::StringArray {"feedback","tuningReference","loopRecordStart","loopCountIn","loopLength"}.contains(child->getStringAttribute("id"))) oldPreset->removeChildElement(child,true);
+        if (juce::StringArray {"loopStart","loopEnd","loopCrossfade","loopSnap","feedback","tuningReference","loopRecordStart","loopCountIn","loopLength"}.contains(child->getStringAttribute("id"))) oldPreset->removeChildElement(child,true);
         child = next;
     }
     auto legacyFile=directory.getChildFile("legacy-036.motefield"); oldPreset->writeTo(legacyFile);
@@ -295,7 +296,7 @@ void checkPresetsAndAutomation (MoteFieldAudioProcessor& processor, const juce::
     require(processor.parameters.getRawParameterValue("tuningReference")->load()==440.f && std::abs(processor.parameters.getRawParameterValue("fieldPitch")->load()-7.06f)<.011f,"legacy preset lost pitch or inherited reference");
 
 
-    require (processor.getParameters().size() == 67, "host parameter count changed unexpectedly");
+    require (processor.getParameters().size() == 71, "host parameter count changed unexpectedly");
     std::set<juce::String> ids;
     for (auto* parameter : processor.getParameters())
     {
@@ -334,8 +335,57 @@ void checkPresetsAndAutomation (MoteFieldAudioProcessor& processor, const juce::
     trigger (3); require (processor.getLooperState() == motefield::LooperState::stopped, "host Stop trigger failed");
     trigger (5); require (processor.getLooperState() == motefield::LooperState::empty, "host Erase trigger failed");
     processor.setParameterValue (freeze, 0.f);processor.setParameterValue (bypass, 0.f);
-    std::cout << "Preset/automation checks passed: 37 factory presets, all 11 modes, disk round trip, overwrite protection, invalid-file rejection, session identity, 67 host parameters and looper triggers.\n";
+    std::cout << "Preset/automation checks passed: 37 factory presets, all 11 modes, disk round trip, overwrite protection, invalid-file rejection, session identity, 71 host parameters and looper triggers.\n";
 }
+void checkLoopRegions(const juce::File& destination)
+{
+    MoteFieldAudioProcessor p;p.prepareToPlay(48000,400);p.setParameterValue("mix",0);p.setParameterValue("loopQuantize",0);p.setParameterValue("looperOrder",1);
+    juce::AudioBuffer<float> block(2,400);juce::MidiBuffer midi;block.clear();p.processBlock(block,midi);
+    p.requestLooperCommand(motefield::LooperCommand::record);
+    for(int tick=0;tick<120;++tick){for(int i=0;i<400;++i)for(int c=0;c<2;++c)block.setSample(c,i,.2f*std::sin(float((tick*400+i)*.01)));p.processBlock(block,midi);}
+    p.requestLooperCommand(motefield::LooperCommand::play);block.clear();p.processBlock(block,midi);const auto original=p.loopData();
+    std::unique_ptr<MoteFieldAudioProcessorEditor> editor(static_cast<MoteFieldAudioProcessorEditor*>(p.createEditor()));editor->setVisible(true);editor->setSize(1620,972);editor->refreshDisplay();
+    for(int i=0;i<4;++i){block.clear();p.processBlock(block,midi);editor->refreshDisplay();}
+    const auto typed=[&](const char* id,juce::String value){auto* label=dynamic_cast<juce::Label*>(find(*editor,id));require(label!=nullptr,"region number field missing");label->setText(value,juce::sendNotificationSync);};
+    typed("loop-start-value","0.25 s");typed("loop-end-value","0.75 s");typed("loop-crossfade-value","120 ms");
+    require(std::abs(p.parameters.getRawParameterValue("loopStart")->load()-.25f)<.001f && std::abs(p.parameters.getRawParameterValue("loopEnd")->load()-.75f)<.001f,"typed seconds did not map to recorded length");
+    require(std::abs(p.parameters.getRawParameterValue("loopCrossfade")->load()-.12f)<.001f,"typed crossfade did not reach engine parameter");
+    typed("loop-start-value","bad input");require(std::abs(p.parameters.getRawParameterValue("loopStart")->load()-.25f)<.001f,"invalid region text changed playback");
+    const auto exportFile=destination.getChildFile("selected-loop.wav");require(p.exportAudio(exportFile).wasOk(),"selected loop export failed");
+    juce::AudioFormatManager formats;formats.registerBasicFormats();std::unique_ptr<juce::AudioFormatReader> reader(formats.createReaderFor(exportFile));
+    require(reader!=nullptr&&reader->lengthInSamples==24000,"export did not use exact selected length");
+    juce::AudioBuffer<float> exported(2,24000);require(reader->read(&exported,0,24000,0,true,true),"could not read selected export");
+    juce::MemoryInputStream raw(original,false);raw.setPosition(17);
+    for(int c=0;c<2;++c)
+    {
+        std::vector<float> samples(48000);for(auto& v:samples)v=raw.readFloat();
+        const auto region=motefield::LoopRegion::from(48000,.25f,.75f);
+        const auto seam=motefield::loopSpliceFrames(region.length(),48000,.12f);
+        for(int i=0;i<24000;++i)require(std::abs(exported.getSample(c,i)-motefield::readLoopSplice([&](int at){return samples[at];},region,i,seam))<.000001f,"export crossfade differs from playback rendering");
+    }
+    require(p.loopData()==original,"selection/export destroyed original recording");
+    const auto folder=destination.getChildFile("region-preset-checks");require(p.saveUserPreset("Selected loop",false,folder).wasOk(),"region preset save failed");
+    juce::MemoryBlock bytes;p.getStateInformation(bytes);MoteFieldAudioProcessor copy;copy.prepareToPlay(48000,400);copy.setStateInformation(bytes.getData(),int(bytes.getSize()));
+    require(copy.loopData()==original&&std::abs(copy.parameters.getRawParameterValue("loopStart")->load()-.25f)<.001f,"instance copy lost region or full original recording");
+    p.applyFactoryPreset(3);require(std::abs(p.parameters.getRawParameterValue("loopStart")->load()-.25f)<.001f,"factory patch reset recorded playback region");
+    p.setParameterValue("loopStart",0);require(p.loadUserPreset(folder.getChildFile("Selected loop.motefield")).wasOk(),"region preset recall failed");
+    require(std::abs(p.parameters.getRawParameterValue("loopStart")->load()-.25f)<.001f,"region was not saved with preset");
+    editor->refreshDisplay();
+    auto* tape=find(*editor,"loop-waveform");require(tape!=nullptr,"region tape missing");
+    const auto event=[&](float x,float y){return juce::MouseEvent(juce::Desktop::getInstance().getMainMouseSource(),{x,y},juce::ModifierKeys(juce::ModifierKeys::leftButtonModifier),1.f,0.f,0.f,0.f,0.f,tape,tape,juce::Time::getCurrentTime(),{497.5f,25.f},juce::Time::getCurrentTime(),1,true);};
+    HostParameterObserver observer;auto* start=p.parameters.getParameter("loopStart");start->addListener(&observer);
+    tape->mouseDown(event(497.5f,25.f));tape->mouseDrag(event(622.5f,25.f));tape->mouseUp(event(622.5f,25.f));start->removeListener(&observer);
+    require(observer.starts==1&&observer.ends==1&&observer.values>0&&std::abs(p.parameters.getRawParameterValue("loopStart")->load()-.35f)<.001f,"region drag did not notify host with one gesture");
+    typed("loop-start-value","0.25 s");
+    for(int i=0;i<4;++i){block.clear();p.processBlock(block,midi);editor->refreshDisplay();}
+    for(int width:{1620,1000}){editor->setSize(width,width*3/5);saveImage(*editor,destination.getChildFile("region-native-"+juce::String(width)+".png"));}
+    click(*editor,"loop-region-full");require(p.parameters.getRawParameterValue("loopStart")->load()==0&&p.parameters.getRawParameterValue("loopEnd")->load()==1,"full recording did not reset range");
+    click(*editor,"loop-region-snap");require(p.parameters.getRawParameterValue("loopSnap")->load()==1,"region snap control failed");
+    typed("loop-crossfade-value","0");require(std::abs(p.parameters.getRawParameterValue("loopCrossfade")->load()-.005f)<.0001,"minimum crossfade removed automatic smoothing");
+    require(p.loopData()==original,"UI edits altered source audio");
+    std::cout<<"Region integration passed: typed controls, invalid input, minimum smoothing, exact-length export, preserved source, copy/preset recall and two UI sizes.\n";
+}
+
 void checkInstanceCopy()
 {
     constexpr int block=256;
@@ -472,6 +522,35 @@ int main (int argc, char** argv)
         setenv ("MOTEFIELD_APPEARANCE_FILE", appearanceFile.getFullPathName().toRawUTF8(),1);
         #endif
         MoteFieldAudioProcessor processor;
+        if (argc > 2 && juce::String (argv[2]) == "--loop-region-review")
+        {
+            // Design-only overlay: deliberately separate from production controls and audio.
+            processor.prepareToPlay(48000,400);processor.applyFactoryPreset(17);
+            std::unique_ptr<MoteFieldAudioProcessorEditor> editor(static_cast<MoteFieldAudioProcessorEditor*>(processor.createEditor()));
+            editor->setVisible(true);editor->setSize(1620,972);
+            class RegionArt final : public juce::Component
+            {
+            public:
+                std::unique_ptr<juce::Drawable> drawing;
+                void paint(juce::Graphics& g) override { if(drawing)drawing->drawWithin(g,getLocalBounds().toFloat(),juce::RectanglePlacement::stretchToFit,1.f); }
+            } art;
+            editor->addAndMakeVisible(art);
+            for(const auto* name:{"loop-region","loop-full"})
+            {
+                auto xml=juce::XmlDocument::parse(destination.getChildFile(juce::String(name)+".svg"));
+                require(xml!=nullptr,"loop design SVG missing");
+                art.drawing=juce::Drawable::createFromSVG(*xml);
+                require(art.drawing!=nullptr,"loop design SVG invalid");
+                for(int width:{1620,1000})
+                {
+                    editor->setSize(width,width*3/5);const auto scale=width/1620.f;
+                    art.setBounds(juce::roundToInt(86*scale),juce::roundToInt(728*scale),juce::roundToInt(1450*scale),juce::roundToInt(121*scale));art.toFront(false);
+                    saveImage(*editor,destination.getChildFile(juce::String(name)+"-"+juce::String(width)+".png"));
+                }
+            }
+            std::cout<<"Loop-region UI design captured at 1000/1620 px; no audio or production UI changes.\n";
+            return 0;
+        }
         if (argc > 2 && juce::String (argv[2]) == "--knob-lights-only")
         {
             processor.prepareToPlay(48000,400); processor.applyFactoryPreset(17);
@@ -593,6 +672,7 @@ int main (int argc, char** argv)
             require (juce::PNGImageFormat().writeImageToStream (comparison,*stream), "face comparison failed");
             std::cout << "Three native face studies captured.\n"; return 0;
         }
+        checkLoopRegions(destination);
         checkInstanceCopy();
         if (argc > 2 && juce::String(argv[2]) == "--copy-only") return 0;
         checkPerformanceIntegration (destination);
@@ -683,13 +763,14 @@ int main (int argc, char** argv)
         processor.setParameterValue("feedback",.2f);
         auto oldState = processor.parameters.copyState();
         for (int i = oldState.getNumChildren() - 1; i >= 0; --i)
-            if (juce::StringArray { motefield::parameter::bypass, "width", "wetSolo", "levelMatch", "reverbSolo", "feedback", "tuningReference", "loopRecordStart", "loopCountIn", "loopLength" }.contains(oldState.getChild (i).getProperty ("id").toString()))
+            if (juce::StringArray { motefield::parameter::bypass, "width", "wetSolo", "levelMatch", "reverbSolo", "feedback", "loopStart", "loopEnd", "loopCrossfade", "loopSnap", "tuningReference", "loopRecordStart", "loopCountIn", "loopLength" }.contains(oldState.getChild (i).getProperty ("id").toString()))
                 oldState.removeChild (i, nullptr);
         juce::MemoryBlock oldBytes;
         juce::AudioProcessor::copyXmlToBinary (*oldState.createXml(), oldBytes);
         processor.setStateInformation (oldBytes.getData(), static_cast<int> (oldBytes.getSize()));
         require (value (motefield::parameter::bypass) < .5f, "v0.1 state did not clear a newer bypass setting");
         require(value("width")==1.f && value("wetSolo")==0.f && value("levelMatch")==0.f && value("reverbSolo")==0.f && value("feedback")==1.f,"legacy session failed neutral monitor defaults");
+        require(value("loopStart")==0.f&&value("loopEnd")==1.f&&std::abs(value("loopCrossfade")-.02f)<.0001f&&value("loopSnap")==0.f,"legacy session failed automatic smoothing defaults");
         require(value("tuningReference")==440.f && value("loopRecordStart")==0.f && value("loopCountIn")==0.f && value("loopLength")==0.f,"legacy session failed new tuning/record defaults");
         processor.setParameterValue (motefield::parameter::freeze, 0.0f);
         processor.setParameterValue (motefield::parameter::bypass, 0.0f);

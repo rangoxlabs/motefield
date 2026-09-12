@@ -209,7 +209,7 @@ juce::Result MoteFieldAudioProcessor::loadUserPreset (const juce::File& file)
         if (const auto* ranged = dynamic_cast<const juce::RangedAudioParameter*> (parameter))
             if (isPresetParameter (ranged->paramID) && seen.count (ranged->paramID) == 0)
             {
-                if ((ranged->paramID == "feedback" || ranged->paramID == "width" || ranged->paramID == "tuningReference" || ranged->paramID == "loopRecordStart" || ranged->paramID == "loopCountIn" || ranged->paramID == "loopLength") || (document->getIntAttribute ("version") == 1 && std::find (extendedParameterIds().begin(), extendedParameterIds().end(), ranged->paramID) != extendedParameterIds().end()))
+                if ((ranged->paramID == "loopStart" || ranged->paramID == "loopEnd" || ranged->paramID == "loopCrossfade" || ranged->paramID == "loopSnap" || ranged->paramID == "feedback" || ranged->paramID == "width" || ranged->paramID == "tuningReference" || ranged->paramID == "loopRecordStart" || ranged->paramID == "loopCountIn" || ranged->paramID == "loopLength") || (document->getIntAttribute ("version") == 1 && std::find (extendedParameterIds().begin(), extendedParameterIds().end(), ranged->paramID) != extendedParameterIds().end()))
                     values.emplace_back (parameters.getParameter (ranged->paramID), ranged->getDefaultValue());
                 else return juce::Result::fail ("This preset is incomplete. Your sound has not changed.");
             }

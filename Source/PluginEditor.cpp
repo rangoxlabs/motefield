@@ -143,6 +143,13 @@ void MoteFieldLookAndFeel::drawButtonBackground (juce::Graphics& g, juce::Button
                                                 const juce::Colour&, bool hover, bool down)
 {
     const auto [paper, ink, muted, line, blue, cyan, coral, yellow, mint] = colours;
+    if(button.getProperties()["loopRegionControl"])
+    {
+        const auto face=button.getLocalBounds().toFloat().reduced(1);
+        g.setColour(button.getToggleState()?cyan.darker(.8f):juce::Colour(0xff20261e));g.fillRoundedRectangle(face,4);
+        g.setColour(button.getToggleState()?cyan:juce::Colour(0xff647056));g.drawRoundedRectangle(face,4,1);
+        return;
+    }
     const auto style = static_cast<int> (button.getProperties()["style"]);
     const auto active = button.getToggleState();
     const auto bounds = button.getLocalBounds().toFloat();
@@ -248,7 +255,7 @@ void MoteFieldLookAndFeel::drawButtonText (juce::Graphics& g, juce::TextButton& 
         : button.getToggleState() && style != 3 && style != 4 && style != 6 ? appearance::onAccent (cyan)
         : (style == 1 && button.getProperties()["glassDark"]) || button.getProperties()["darkControl"] ? juce::Colour (0xffeff3f3) : ink;
 
-    text (g, button.getButtonText(), bounds, (button.getProperties()["panelButton"] ? 12.5f : style == 2 ? 14.0f : style == 5 ? 16.0f : style == 1 ? 12.5f : style == 6 || utility ? 7.5f : 11.0f) * scale,
+    text (g, button.getButtonText(), bounds, (button.getProperties()["loopRegionControl"] ? 16.f : button.getProperties()["panelButton"] ? 12.5f : style == 2 ? 14.0f : style == 5 ? 16.0f : style == 1 ? 12.5f : style == 6 || utility ? 7.5f : 11.0f) * scale,
           colour, style == 5 || (style == 1 && button.getToggleState()), juce::Justification::centred,
           style == 1 ? 0.0f : .04f);
 }
@@ -630,33 +637,141 @@ void FieldDisplay::paint (juce::Graphics& g)
     }
 }
 
+LooperTape::LooperTape(MoteFieldAudioProcessor& p,const FieldDisplay& f):processor(p),field(f)
+{
+    for(auto* label:{&startValue,&endValue,&fadeValue})
+    {
+        addAndMakeVisible(*label);label->setEditable(false,true,false);label->setJustificationType(juce::Justification::centredRight);
+        label->setColour(juce::Label::textColourId,juce::Colour(0xffeef1e9));
+        label->setColour(juce::Label::backgroundColourId,juce::Colour(0xff20261e));
+        label->setTooltip("Double-click to type a precise value.");
+    }
+    startValue.setComponentID("loop-start-value");endValue.setComponentID("loop-end-value");fadeValue.setComponentID("loop-crossfade-value");
+    startValue.onTextChange=[this]{edit(startValue,0);};endValue.onTextChange=[this]{edit(endValue,1);};fadeValue.onTextChange=[this]{edit(fadeValue,2);};
+    addAndMakeVisible(snapButton);addAndMakeVisible(fullButton);
+    snapButton.setComponentID("loop-region-snap");fullButton.setComponentID("loop-region-full");
+    for(auto* button:{&snapButton,&fullButton}){button->getProperties().set("darkControl",true);button->getProperties().set("loopRegionControl",true);}
+    fullButton.setButtonText("Full recording");fullButton.onClick=[this]{setRange(0,1);update();};
+    snapButton.onClick=[this]{processor.setParameterValue("loopSnap",processor.parameters.getRawParameterValue("loopSnap")->load()>.5f?0.f:1.f);update();};
+}
+void LooperTape::resized()
+{
+    const auto s=getWidth()/1450.f;
+    const auto put=[&](juce::Component& c,int x,int y,int w,int h){c.setBounds(juce::roundToInt(x*s),juce::roundToInt(y*s),juce::roundToInt(w*s),juce::roundToInt(h*s));};
+    put(startValue,242,94,95,24);put(endValue,414,94,95,24);put(fadeValue,905,94,98,24);
+    put(snapButton,1052,92,160,28);put(fullButton,1228,92,207,28);
+    for(auto* label:{&startValue,&endValue,&fadeValue})label->setFont(font(14*s));
+}
+void LooperTape::update()
+{
+    const auto& f=field.currentFrame();seconds=f.loopSeconds;
+    first=juce::jlimit(0.f,1.f,processor.parameters.getRawParameterValue("loopStart")->load());
+    last=juce::jlimit(first,1.f,processor.parameters.getRawParameterValue("loopEnd")->load());
+    fade=processor.parameters.getRawParameterValue("loopCrossfade")->load();
+    available=seconds>0 && f.loopState!=motefield::LooperState::empty && f.loopState!=motefield::LooperState::recording;
+    for(auto* label:{&startValue,&endValue,&fadeValue})label->setEnabled(available);
+    snapButton.setEnabled(available);fullButton.setEnabled(available);
+    if(!startValue.isBeingEdited())startValue.setText(juce::String(first*seconds,2)+" s",juce::dontSendNotification);
+    if(!endValue.isBeingEdited())endValue.setText(juce::String(last*seconds,2)+" s",juce::dontSendNotification);
+    if(!fadeValue.isBeingEdited())fadeValue.setText(juce::String(juce::roundToInt(fade*1000))+" ms",juce::dontSendNotification);
+    const bool snapping=processor.parameters.getRawParameterValue("loopSnap")->load()>.5f;
+    snapButton.setButtonText(snapping?"Snap 1/16":"Snap off");snapButton.setToggleState(snapping,juce::dontSendNotification);
+    fadeValue.setColour(juce::Label::textColourId,appearance::read(*this).cyan);
+    repaint();
+}
+void LooperTape::setRange(float a,float b)
+{
+    processor.setParameterValue("loopEnd",b);processor.setParameterValue("loopStart",a);
+}
+void LooperTape::edit(juce::Label& label,int which)
+{
+    if(!available){update();return;}
+    const auto value=label.getText().trim();char* tail=nullptr;
+    const auto number=std::strtod(value.toRawUTF8(),&tail);const auto rest=juce::String(tail).trim();
+    if(tail==value.toRawUTF8() || !std::isfinite(number) || !(rest.isEmpty()||rest=="s"||rest=="ms")){update();return;}
+    const auto gap=juce::jmin(.02f/seconds,.5f);
+    if(which==0)setRange(juce::jlimit(0.f,juce::jmax(0.f,last-gap),float(number)/seconds),last);
+    if(which==1)setRange(first,juce::jlimit(juce::jmin(1.f,first+gap),1.f,float(number)/seconds));
+    if(which==2)processor.setParameterValue("loopCrossfade",juce::jlimit(.005f,1.f,float(number)/1000));
+    update();
+}
+float LooperTape::snap(float value) const
+{
+    if(processor.parameters.getRawParameterValue("loopSnap")->load()>.5f && seconds>0)
+    {const auto step=60.f/static_cast<float>(processor.getEffectiveBpm())/4.f/seconds;return std::round(value/step)*step;}
+    return value;
+}
+int LooperTape::hit(juce::Point<float> point) const
+{
+    if(!available)return 0;const auto s=getWidth()/1450.f;point/=s;
+    const auto speed=processor.parameters.getRawParameterValue("loopContinuous")->load()>.5f?processor.parameters.getRawParameterValue("loopRate")->load():std::pow(2.f,processor.parameters.getRawParameterValue("looperSpeed")->load()-1.f);
+    const auto a=185+first*1250,b=185+last*1250,fw=juce::jmin(fade*speed/seconds,(last-first)*.5f)*1250;
+    if(point.y>=68&&point.y<=89){if(std::abs(point.x-a-fw)<14)return 3;if(std::abs(point.x-b+fw)<14)return 4;}
+    if(point.y>=18&&point.y<=83){if(std::abs(point.x-a)<10||(point.y<37&&point.x>=a&&point.x<=a+48))return 1;if(std::abs(point.x-b)<10||(point.y<37&&point.x>=b-48&&point.x<=b))return 2;if(point.x>a&&point.x<b)return 5;}
+    return 0;
+}
+void LooperTape::mouseMove(const juce::MouseEvent& e)
+{const auto part=hit(e.position);setMouseCursor(part==5?juce::MouseCursor::DraggingHandCursor:part?juce::MouseCursor::LeftRightResizeCursor:juce::MouseCursor::NormalCursor);}
+void LooperTape::mouseDown(const juce::MouseEvent& e)
+{
+    dragging=hit(e.position);dragX=e.position.x;dragFirst=first;dragLast=last;
+    if(!dragging)return;
+    for(const auto& id:(dragging==3||dragging==4)?juce::StringArray{"loopCrossfade"}:juce::StringArray{"loopStart","loopEnd"})
+    {auto* p=processor.parameters.getParameter(id);p->beginChangeGesture();gestures.push_back(p);}
+}
+void LooperTape::mouseDrag(const juce::MouseEvent& e)
+{
+    if(!dragging||!available)return;const auto s=getWidth()/1450.f;
+    const auto at=(e.position.x/s-185)/1250.f,gap=juce::jmin(.02f/seconds,.5f);
+    // The gesture spans the complete drag, so automation records one continuous edit.
+    const auto set=[&](const char* id,float v){auto* p=processor.parameters.getParameter(id);p->setValueNotifyingHost(p->convertTo0to1(v));};
+    if(dragging==1)set("loopStart",juce::jlimit(0.f,juce::jmax(0.f,last-gap),snap(at)));
+    if(dragging==2)set("loopEnd",juce::jlimit(juce::jmin(1.f,first+gap),1.f,snap(at)));
+    if(dragging==3||dragging==4){const auto speed=processor.parameters.getRawParameterValue("loopContinuous")->load()>.5f?processor.parameters.getRawParameterValue("loopRate")->load():std::pow(2.f,processor.parameters.getRawParameterValue("looperSpeed")->load()-1.f);set("loopCrossfade",juce::jlimit(.005f,1.f,(dragging==3?at-first:last-at)*seconds/speed));}
+    if(dragging==5){const auto delta=juce::jlimit(-dragFirst,1.f-dragLast,snap((e.position.x-dragX)/s/1250.f));set("loopEnd",dragLast+delta);set("loopStart",dragFirst+delta);}
+    update();
+}
+void LooperTape::mouseUp(const juce::MouseEvent&)
+{for(auto* p:gestures)p->endChangeGesture();gestures.clear();dragging=0;}
 void LooperTape::paint(juce::Graphics& g)
 {
-    const auto& frame=field.currentFrame();const auto p=appearance::read(*this);
-    const auto s=getWidth()/1210.f;auto area=getLocalBounds().toFloat().reduced(2,5*s);
-    const auto plot=area.withTrimmedTop(27*s).withTrimmedBottom(5*s);
-    const auto seconds=frame.loopSeconds>0?frame.loopSeconds:60.f;
-    for(int tick=0;tick<=4;++tick)
-    {const auto x=plot.getX()+plot.getWidth()*tick/4.f;
-     text(g,juce::String(seconds*tick/4.f,1)+" s",{x-(tick==4?66*s:0),area.getY(),66*s,22*s},14*s,juce::Colour(0xffeeeeea));
-     g.setColour(juce::Colours::white.withAlpha(.18f));g.drawLine(x,plot.getY(),x,plot.getBottom(),.7f);}
-    g.setColour(juce::Colours::white.withAlpha(.2f));g.drawHorizontalLine(juce::roundToInt(plot.getCentreY()),plot.getX(),plot.getRight());
-    if(frame.loopState==motefield::LooperState::empty)return;
-    juce::Path wave;
-    const auto point=[&](int bin,bool upper){const auto amp=juce::jmin(1.f,std::pow(frame.loopWaveform[bin],.40f))*plot.getHeight()*.48f;
-        return juce::Point<float>(plot.getX()+static_cast<float>(bin)/(frame.loopWaveform.size()-1)*plot.getWidth(),plot.getCentreY()+(upper?-amp:amp));};
-    wave.startNewSubPath(point(0,true));for(int i=1;i<static_cast<int>(frame.loopWaveform.size());++i)wave.lineTo(point(i,true));for(int i=static_cast<int>(frame.loopWaveform.size())-1;i>=0;--i)wave.lineTo(point(i,false));wave.closeSubPath();
-    g.setColour(juce::Colour(0xfff0f1e9));g.fillPath(wave);
-    const auto playX=plot.getX()+frame.loopProgress*plot.getWidth();
-    for(int glow=7;glow>0;--glow){g.setColour(p.cyan.withAlpha(.025f));g.drawLine(playX,plot.getY()-7*s,playX,plot.getBottom(),glow*2*s);}
-    g.setColour(p.cyan);g.drawLine(playX,plot.getY()-7*s,playX,plot.getBottom(),2*s);
-    auto badge=juce::Rectangle<float>(64*s,24*s).withCentre({juce::jlimit(area.getX()+32*s,area.getRight()-32*s,playX),area.getY()+11*s});
-    g.setColour(juce::Colour(0xff101510));g.fillRoundedRectangle(badge,5*s);g.setColour(p.cyan);g.drawRoundedRectangle(badge,5*s,1);
-    text(g,juce::String(frame.loopProgress*seconds,1)+" s",badge,14*s,p.cyan,false,juce::Justification::centred);
+    const auto& f=field.currentFrame();const auto p=appearance::read(*this);const auto s=getWidth()/1450.f;
+    g.addTransform(juce::AffineTransform::scale(s));
+    const auto write=[&](juce::String t,juce::Rectangle<float> r,float size,juce::Colour c){text(g,t,r,size,c);};
+    write("RECORDED LOOP",{9,0,170,26},15,juce::Colours::white);write("Loop 01",{9,30,170,26},19,juce::Colours::white);
+    auto status=f.loopState==motefield::LooperState::empty?juce::String("READY"):f.loopState==motefield::LooperState::recording?juce::String("RECORDING"):f.loopState==motefield::LooperState::overdubbing?juce::String("OVERDUB"):f.loopState==motefield::LooperState::stopped?juce::String("STOPPED"):juce::String("PLAYING");
+    if(f.loopPending)status=f.loopWaiting?"WAIT FOR HOST":"IN "+juce::String(f.loopCountdown,1)+" BEATS";
+    else if(f.loopState==motefield::LooperState::recording&&f.recordingBars>0)status="REC "+juce::String(f.recordingBar)+"/"+juce::String(f.recordingBars)+" BARS";
+    write(status,{9,59,170,23},14,p.cyan);write(juce::String(seconds,2)+" s recorded",{9,89,174,24},13,juce::Colour(0xffa7b09e));
+    const auto duration=seconds>0?seconds:60.f;const float x=185,w=1250,y=28,h=52;
+    for(int i=0;i<=4;++i){const auto at=x+i*w/4;write(juce::String(duration*i/4,2)+" s",{at-(i==4?72:0),-4,72,24},12,juce::Colour(0xffabb3a8));g.setColour(juce::Colours::white.withAlpha(.16f));g.drawLine(at,y,at,y+h);}
+    const auto speed=processor.parameters.getRawParameterValue("loopContinuous")->load()>.5f?processor.parameters.getRawParameterValue("loopRate")->load():std::pow(2.f,processor.parameters.getRawParameterValue("looperSpeed")->load()-1.f);
+    const auto a=x+first*w,b=x+last*w,fw=seconds>0?juce::jmin(fade*speed/seconds,(last-first)*.5f)*w:0;
+    if(seconds>0)
+    {
+        g.setColour(p.cyan.withAlpha(.08f));g.fillRect(a,y,b-a,h);
+        for(int i=0;i<static_cast<int>(f.loopWaveform.size());++i){const auto at=x+i*w/(f.loopWaveform.size()-1),amp=std::pow(juce::jmin(1.f,f.loopWaveform[i]),.5f)*h*.48f;g.setColour(juce::Colours::white.withAlpha(at>=a&&at<=b? .9f:.22f));g.drawLine(at,y+h*.5f-amp,at,y+h*.5f+amp,1.6f);}
+        if(available)
+        {
+            for(auto left:{a,b-fw})
+            {
+                g.setColour(p.cyan.withAlpha(.15f));g.fillRect(left,y,fw,h);
+                juce::Path rise;rise.startNewSubPath(left,y+h);rise.cubicTo(left+fw*.5f,y+h,left+fw*.5f,y,left+fw,y);g.setColour(p.cyan);g.strokePath(rise,juce::PathStrokeType(1.7f));
+                juce::Path fall;fall.startNewSubPath(left,y);fall.cubicTo(left+fw*.5f,y,left+fw*.5f,y+h,left+fw,y+h);g.setColour(juce::Colours::white.withAlpha(.55f));g.strokePath(fall,juce::PathStrokeType(1.2f));
+            }
+            for(int end=0;end<2;++end){const auto at=end?b:a,bx=end?at-48:at;g.setColour(p.cyan);g.drawLine(at,20,at,83,2);g.fillRoundedRectangle(bx,18,48,18,3);text(g,end?"END":"START",{bx,18,48,18},10,juce::Colour(0xff141b0d),true,juce::Justification::centred);}
+            g.setColour(p.cyan);for(float at:{a+fw,b-fw})g.fillEllipse(at-4,76,8,8);
+            if(f.loopState==motefield::LooperState::playing||f.loopState==motefield::LooperState::overdubbing){g.setColour(juce::Colours::white.withAlpha(.8f));g.drawLine(x+f.loopProgress*w,y,x+f.loopProgress*w,y+h,1.2f);}
+        }
+    }
+    g.setColour(juce::Colour(0xff353d32));g.drawLine(x,87,x+w,87);
+    for(const auto box:{juce::Rectangle<float>(185,93,158,26),{357,93,158,26},{770,93,238,26}}){g.setColour(juce::Colour(0xff20261e));g.fillRoundedRectangle(box,4);g.setColour(juce::Colour(0xff647056));g.drawRoundedRectangle(box,4,1);}
+    write("Start",{195,93,45,26},13,juce::Colour(0xffbbc4b5));write("End",{367,93,45,26},13,juce::Colour(0xffbbc4b5));write("Crossfade",{781,93,123,26},14,juce::Colour(0xffbbc4b5));
+    write("Length "+juce::String((last-first)*seconds,2)+" s",{541,93,220,26},14,juce::Colour(0xffbfc7b9));
 }
 
 MoteFieldAudioProcessorEditor::MoteFieldAudioProcessorEditor (MoteFieldAudioProcessor& owner)
-    : AudioProcessorEditor (&owner), processor (owner), looperTape (fieldDisplay), tooltips (this, 600)
+    : AudioProcessorEditor (&owner), processor (owner), looperTape (owner,fieldDisplay), tooltips (this, 600)
 {
     using namespace motefield::parameter;
     setLookAndFeel (&lookAndFeel);
@@ -1097,7 +1212,7 @@ void MoteFieldAudioProcessorEditor::refreshDisplay()
     const auto presetName = processor.currentPresetName() + (processor.isPresetModified() ? " *" : "");
     if (presetBox.getText() != presetName) presetBox.setText (presetName, juce::dontSendNotification);
     helpText = currentHelp();
-    looperTape.repaint();
+    looperTape.update();
     repaint();
 }
 
@@ -1143,7 +1258,7 @@ void MoteFieldAudioProcessorEditor::resized()
     for(auto* b:{&wetSoloButton,&levelMatchButton}) { b->getProperties().set("darkControl",true); }
     place(reverseButton,1294,510,145,35);reverseButton.getProperties().set("darkControl",true);
     place(tapButton,1084,588,134,100);place(holdButton,1226,588,134,100);place(bypassButton,1366,588,134,100);
-    place(looperTape,271,728,1210,121);
+    place(looperTape,86,728,1450,121);
     place(recordButton,484,871,88,60);place(playButton,578,871,88,60);place(dubButton,674,871,88,60);
     place(stopButton,770,871,88,60);place(undoButton,866,871,88,60);place(eraseButton,962,871,88,60);
     place(preButton,1071,871,87,60);place(postButton,1167,871,87,60);place(loopReverseButton,1264,871,87,60);place(detailsButton,1455,871,90,60);
@@ -1177,13 +1292,6 @@ void MoteFieldAudioProcessorEditor::paint(juce::Graphics& g)
     const auto& f=fieldDisplay.currentFrame();const auto level=juce::jlimit(0.f,1.f,(juce::Decibels::gainToDecibels(f.outputLevel,-60.f)+48.f)/48.f);
     for(int i=0;i<18;++i){g.setColour(i<level*18?p.ink:p.line.withAlpha(.4f));g.fillRect(1455.f+i*5.2f,73.f-(i+5)*1.2f,3.6f,(i+5)*1.2f);}
     text(g,"EFFECT MODE",{133,219,239,27},15,juce::Colours::white,false,juce::Justification::centred);
-    text(g,"RECORDED LOOP",{86,729,177,27},16,juce::Colours::white);
-    text(g,"Loop 01",{94,762,160,26},19,juce::Colours::white);
-    text(g,secondsText(f.loopSeconds),{94,792,165,24},15,juce::Colours::white);
-    const auto state=processor.getLooperState();juce::String status=state==motefield::LooperState::empty?"READY":state==motefield::LooperState::recording?"RECORDING":state==motefield::LooperState::overdubbing?"OVERDUB":state==motefield::LooperState::stopped?"STOPPED":"PLAYING";
-    if (f.loopPending) status = f.loopWaiting ? "WAIT FOR HOST" : "IN " + juce::String (f.loopCountdown, 1) + " BEATS";
-    else if (state == motefield::LooperState::recording && f.recordingBars > 0) status = "REC " + juce::String (f.recordingBar) + "/" + juce::String (f.recordingBars) + " BARS";
-    text(g,status,{95,825,164,24},15,p.cyan);
     if(detailsOpen)
     {
         text(g,"REVERB CHARACTER",{962,992,234,24},13,p.muted);

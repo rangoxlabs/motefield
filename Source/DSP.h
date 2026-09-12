@@ -81,6 +81,7 @@ struct EngineParameters
     bool bypass = false;
     bool quantize = false, looperOnly = false, trails = false;
     float loopFade = 0.0f;
+    float loopStart = 0.f, loopEnd = 1.f, loopCrossfade = .02f;
     int fadeMode = 0;
     bool recordIntoDub = false;
     int recordStart = 0, recordBars = 0;

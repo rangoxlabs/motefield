@@ -65,9 +65,30 @@ void loopClicks(double sr, float speed, bool reverse)
     require(maxJump<.015f,"phrase-loop seam clicks on an intentionally non-zero-crossing recording");
     require(energy>5,"seam repair muted loop playback");
 }
+void recordToPlayback()
+{
+    constexpr int rate=16000,block=128;
+    for(bool automatic:{false,true})
+    {
+        motefield::Engine e;e.prepare(rate,block,2);motefield::EngineParameters p;
+        p.mix=0;p.looperBeforeEffect=true;p.looperLevel=1;p.space=0;p.quantize=false;p.recordStart=1;p.recordBars=automatic?1:0;p.bpm=120;
+        std::array<float,block> input{},left{},right{};const float* in[]{input.data(),input.data()};float* out[]{left.data(),right.data()};
+        for(int i=0;i<100;++i)e.process(in,out,2,block,p);
+        input.fill(.2f);e.requestLooperCommand(motefield::LooperCommand::record);
+        const int count=automatic?rate*2:4096;
+        for(int pos=0;pos<count;pos+=block)e.process(in,out,2,std::min(block,count-pos),p);
+        float previous=left[(count-1)%block],step=0;
+        if(!automatic)e.requestLooperCommand(motefield::LooperCommand::play);
+        for(int i=0;i<10;++i){e.process(in,out,2,block,p);for(float v:left){step=std::max(step,std::abs(v-previous));previous=v;}}
+        require(step<.004f,"record-to-play transition added an abrupt loop signal");
+        require(previous>.35f,"automatic start fade suppressed loop playback");
+        std::cout<<(automatic?"Fixed-bar":"Manual")<<" record-to-play max step="<<step<<std::endl;
+    }
+}
 int main(int argc,char** argv)
 {
     try {
+        recordToPlayback();
         if(argc==1) { grainClicks(); grainClicks(true); }
         if(argc>1 && std::string(argv[1])=="--glass-only") { grainClicks(true); return 0; }
         for(double sr:{44100.,48000.}) for(float speed:{.5f,1.f,2.f,4.f}) for(bool reverse:{false,true}) loopClicks(sr,speed,reverse);

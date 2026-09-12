@@ -142,6 +142,7 @@ void MoteFieldAudioProcessor::processAudio (juce::AudioBuffer<float>& buffer, in
     values.looperBeforeEffect = load (motefield::parameter::looperOrder) > 0.5f;
     values.bypass = load (motefield::parameter::bypass) > 0.5f;
 
+    values.loopStart=load("loopStart");values.loopEnd=load("loopEnd");values.loopCrossfade=load("loopCrossfade");
     values.quantize = load ("loopQuantize") > .5f;
     values.recordStart = static_cast<int> (load ("loopRecordStart"));
     values.recordCountIn = load ("loopCountIn") > .5f;
@@ -417,6 +418,11 @@ juce::AudioProcessorValueTreeState::ParameterLayout MoteFieldAudioProcessor::cre
     layout.add (std::make_unique<juce::AudioParameterFloat> (ParameterID { "feedback", 8 }, "Feedback",
         juce::NormalisableRange<float> { 0.f, 1.f, .001f }, 1.f,
         juce::AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int) { return juce::String(juce::roundToInt(v*100.f)) + "%"; })));
+    layout.add(std::make_unique<juce::AudioParameterFloat>(ParameterID{"loopStart",9},"Loop Start",juce::NormalisableRange<float>{0.f,1.f},0.f));
+    layout.add(std::make_unique<juce::AudioParameterFloat>(ParameterID{"loopEnd",9},"Loop End",juce::NormalisableRange<float>{0.f,1.f},1.f));
+    layout.add(std::make_unique<juce::AudioParameterFloat>(ParameterID{"loopCrossfade",9},"Loop Crossfade",juce::NormalisableRange<float>{.005f,1.f,.001f},.02f,
+        juce::AudioParameterFloatAttributes().withStringFromValueFunction([](float v,int){return juce::String(juce::roundToInt(v*1000.f))+" ms";})));
+    layout.add(std::make_unique<juce::AudioParameterBool>(ParameterID{"loopSnap",9},"Loop Region Snap",false));
     return layout;
 }
 

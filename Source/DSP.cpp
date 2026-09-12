@@ -1,3 +1,4 @@
+#include "LoopPlayback.h"
 #include "DSP.h"
 
 #include <algorithm>
@@ -766,7 +767,7 @@ public:
     void prepare (double rate)
     {
         std::lock_guard<std::mutex> lock (archiveMutex);
-        sampleRate = rate;
+        sampleRate = rate;spliceSmoothing=1.f-std::exp(-1.f/static_cast<float>(rate*.02));
         slots[0] = std::make_unique<Storage> (static_cast<int> (std::ceil (rate * 60.0)));
         slots[1].reset(); slots[2].reset(); slots[3].reset(); active.store (0); pendingSlot.store (-1); latestSlot.store (0); freeSlots.store (0b1110u);
         reset();
@@ -775,6 +776,7 @@ public:
     {
         if (slots[active.load()]) slots[active.load()]->length.store (0);
         position = 0; recordPosition = 0; generation = 1; canUndo = false;
+        previousRegion = {}; lastLoop = {}; transitionFrom = {}; transition = 1.f; previousReverse=false;smoothedSplice=.02f;stopping=false;
         state.store (static_cast<int> (LooperState::empty)); progress.store (0);
         commandRead.store (0); commandWrite.store (0); pendingCommand = LooperCommand::none;
         pending.store (false); recordBeats = recordGoal = countdown = 0; waiting = false; internalBeat = 0; fadeGain = 0; lastBeat = -1; speedSmooth = 1;
@@ -786,6 +788,7 @@ public:
         {
             const auto previous = active.load (std::memory_order_acquire);
             position = 0; recordPosition = 0; generation = 1; canUndo = false; fadeGain = 0;
+            previousRegion = {}; lastLoop = {}; transitionFrom = {}; transition=1.f;stopping=false;
             const auto& storage = *slots[next];
             state.store (static_cast<int> (storage.length.load() > 1 ? (storage.resume ? LooperState::playing : LooperState::stopped) : LooperState::empty));
             pendingCommand = LooperCommand::none; pending.store (false); progress.store (0);
@@ -916,32 +919,41 @@ public:
         }
         else if ((st == LooperState::playing || st == LooperState::overdubbing || stopping) && data.length.load() > 1)
         {
-            const auto length = data.length.load();
+            const auto total = data.length.load();
+            const auto region = LoopRegion::from(total,p.loopStart,p.loopEnd);
+            const auto length = region.length();
+            if (region.start!=previousRegion.start || region.end!=previousRegion.end || p.looperReverse!=previousReverse)
+            {
+                const auto absolute=position+previousRegion.start;
+                position=absolute>=region.start && absolute<region.end ? absolute-region.start : p.looperReverse?length-1:0;
+                transitionFrom=lastLoop;transition=0.f;
+                previousRegion=region;previousReverse=p.looperReverse;
+            }
             if (p.quantize && p.hostPositionValid && p.hostPlaying && lastBeat >= 0 && std::abs (beat - lastBeat - 1.0 / quarter) > .05)
-                position = wrapPosition ((beat - originBeat) * quarter * p.looperSpeed, length);
+            {
+                const auto next=wrapPosition((beat-originBeat)*quarter*p.looperSpeed,length);
+                if(std::abs(next-position)>1.0){transitionFrom=lastLoop;transition=0.f;}
+                position=next;
+            }
             const bool fadeIn = p.fadeMode != 2, fadeOut = p.fadeMode != 1;
-            const auto fadeStep = p.loopFade > .001f ? 1.f / (p.loopFade * static_cast<float> (sampleRate)) : 1.f;
-            fadeGain = stopping ? std::max (0.f, fadeGain - (fadeOut ? fadeStep : 1.f)) : std::min (1.f, fadeGain + (fadeIn ? fadeStep : 1.f));
-            const auto a = static_cast<int> (position), b = (a + 1) % length; const auto t = static_cast<float> (position - a);
-            // Reconcile endpoint offsets over a short playback-time splice. The raw recording,
-            // sample count, tempo and undo layers remain untouched; forward and reverse share it.
-            const auto seamWidth = std::max (1.0, std::min (length * .25, sampleRate * .005 * std::max (.25f, speedSmooth)));
-            const auto seamWeight = [length, seamWidth] (int index)
+            const auto seconds=stopping?(fadeOut?p.loopFade:0.f):(fadeIn?p.loopFade:0.f);
+            const auto fadeStep=1.f/static_cast<float>(sampleRate*std::max(.005f,seconds));
+            fadeGain=stopping?std::max(0.f,fadeGain-fadeStep):std::min(1.f,fadeGain+fadeStep);
+            const auto targetSplice=clamp(p.loopCrossfade,.005f,1.f);
+            smoothedSplice+=spliceSmoothing*(targetSplice-smoothedSplice);
+            if(std::abs(smoothedSplice-targetSplice)<.000001f)smoothedSplice=targetSplice;
+            const auto seam=loopSpliceFrames(length,sampleRate,smoothedSplice,speedSmooth);
+            transition=std::min(1.f,transition+1.f/static_cast<float>(sampleRate*.01));
+            const auto blend=transition*transition*(3.f-2.f*transition);
+            for(int c=0;c<2;++c)
             {
-                const auto distance = std::min (index, length - 1 - index);
-                const auto x = static_cast<float> (clamp (1.0 - distance / seamWidth, 0.0, 1.0));
-                return .5f * x * x * (3.f - 2.f * x) * (index < length / 2 ? -1.f : 1.f);
-            };
-            const auto wa = seamWeight (a), wb = seamWeight (b);
-            for (int c = 0; c < 2; ++c)
-            {
-                const auto mismatch = data.read (c, 0) - data.read (c, length - 1);
-                const auto loop = lerp (data.read (c, a) + mismatch * wa, data.read (c, b) + mismatch * wb, t) * p.looperLevel * fadeGain;
-                (c == 0 ? outL : outR) += loop;
+                auto loop=readLoopSplice([&](int i){return data.read(c,i);},region,position,seam)*p.looperLevel*fadeGain;
+                loop=lerp(transitionFrom[c],loop,blend);lastLoop[c]=loop;
+                (c==0?outL:outR)+=loop;
             }
             if (st == LooperState::overdubbing)
             {
-                const auto i = clamp (static_cast<int> (std::llround (position)), 0, length - 1);
+                const auto i = region.start + clamp (static_cast<int> (std::llround (position)), 0, length - 1);
                 const auto tag = data.stamps[i].load(); const auto stamp = static_cast<unsigned> (tag & 65535u);
                 data.stamps[i].store (tag + 0x10000u);
                 if (stamp != generation)
@@ -954,8 +966,9 @@ public:
                 canUndo = true;
             }
             speedSmooth += (1.f - std::exp (-1.f / static_cast<float> (sampleRate * .01))) * (p.looperSpeed - speedSmooth);
+            if(std::abs(speedSmooth-p.looperSpeed)<.0001f*std::max(1.f,p.looperSpeed))speedSmooth=p.looperSpeed;
             position = wrapPosition (position + (p.looperReverse ? -1 : 1) * speedSmooth, length);
-            progress.store (static_cast<float> (position / length));
+            progress.store (static_cast<float> ((region.start + position) / total));
             if (stopping && fadeGain <= 0) { stopping = false; state.store (static_cast<int> (LooperState::stopped)); }
         }
         lastBeat = beat;
@@ -973,7 +986,9 @@ private:
         auto& data = *slots[active.load()];
         for (int i = recordPosition; i < 2; ++i) { const auto tag = data.stamps[i].load(); data.stamps[i].store (tag + 0x10000u); data.base[0][i].store (0); data.base[1][i].store (0); data.stamps[i].store ((tag + 0x20000u) & ~std::uint64_t (65535)); }
         data.length.store (std::max (recordPosition, 2));
-        position = 0; fadeGain = 0; progress.store (0);
+        previousRegion=LoopRegion::from(std::max(recordPosition,2),p.loopStart,p.loopEnd);
+        position = p.looperReverse?previousRegion.length()-1:0; fadeGain = 0; lastLoop={};transitionFrom={};transition=1.f; previousReverse=p.looperReverse;
+        progress.store(static_cast<float>(previousRegion.start)/std::max(recordPosition,2));
         state.store (static_cast<int> (stop ? LooperState::stopped : p.recordIntoDub ? LooperState::overdubbing : LooperState::playing));
     }
     void execute (LooperCommand cmd, const EngineParameters& p, double beat) noexcept
@@ -985,10 +1000,10 @@ private:
         if (cmd == LooperCommand::burstStart) { data.length.store (0); st = LooperState::empty; cmd = LooperCommand::record; }
         if (cmd == LooperCommand::burstEnd) { if (st == LooperState::recording) { auto options = p; options.recordIntoDub = false; finish (false, options); } return; }
         if (cmd == LooperCommand::stop || (cmd == LooperCommand::stopPlay && st != LooperState::stopped))
-        { if (st == LooperState::recording) finish (true, p); else if (st == LooperState::playing || st == LooperState::overdubbing) { stopping = p.loopFade > 0 && p.fadeMode != 1; state.store (static_cast<int> (stopping ? LooperState::playing : LooperState::stopped)); } return; }
+        { if (st == LooperState::recording) finish (true, p); else if (st == LooperState::playing || st == LooperState::overdubbing) { stopping = true; state.store (static_cast<int> (LooperState::playing)); } return; }
         if (cmd == LooperCommand::record && st != LooperState::empty && st != LooperState::recording) return;
         if (cmd == LooperCommand::play || (cmd == LooperCommand::stopPlay && st == LooperState::stopped))
-        { if (st == LooperState::recording) finish (false, p); else if (st != LooperState::empty) { state.store (static_cast<int> (LooperState::playing)); fadeGain = 0; stopping = false; } return; }
+        { if (st == LooperState::recording) finish (false, p); else if (st != LooperState::empty) { if(st==LooperState::stopped)fadeGain=0; state.store (static_cast<int> (LooperState::playing)); stopping = false; } return; }
         if (cmd == LooperCommand::dub && st != LooperState::playing && st != LooperState::overdubbing) return;
         if (st == LooperState::empty) { recordBeats = 0; recordBarSize = std::max (.25, p.beatsPerBar); recordGoal = burst ? 0 : p.recordBars * recordBarSize; recordPosition = 0; generation = 1; data.layers[1].store (true); canUndo = false; originBeat = beat; stopping = false; state.store (static_cast<int> (LooperState::recording)); }
         else if (st == LooperState::recording) finish (false, p);
@@ -1009,6 +1024,9 @@ private:
     int recordPosition = 0; unsigned generation = 1;
     bool canUndo = false, stopping = false;
     float fadeGain = 0, speedSmooth = 1;
+    LoopRegion previousRegion {};
+    std::array<float,2> lastLoop {}, transitionFrom {};
+    float transition=1.f, smoothedSplice=.02f, spliceSmoothing=.001f;bool previousReverse=false;
 };
 } // namespace
 

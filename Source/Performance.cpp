@@ -1,3 +1,4 @@
+#include "LoopPlayback.h"
 #include "PluginProcessor.h"
 #include <cmath>
 
@@ -60,7 +61,7 @@ bool decode (const juce::MemoryBlock& bytes, motefield::AudioSnapshot& snapshot)
 
 const std::vector<juce::String>& MoteFieldAudioProcessor::extendedParameterIds()
 {
-    static const auto ids = [] { std::vector<juce::String> result; for (const auto& c : controls) result.emplace_back (c.id); for (const auto* id : { "width", "wetSolo", "levelMatch", "tuningReference", "loopRecordStart", "loopCountIn", "loopLength", "reverbSolo", "feedback" }) result.emplace_back (id); return result; }();
+    static const auto ids = [] { std::vector<juce::String> result; for (const auto& c : controls) result.emplace_back (c.id); for (const auto* id : { "width", "wetSolo", "levelMatch", "tuningReference", "loopRecordStart", "loopCountIn", "loopLength", "reverbSolo", "feedback", "loopStart", "loopEnd", "loopCrossfade", "loopSnap" }) result.emplace_back (id); return result; }();
     return ids;
 }
 void MoteFieldAudioProcessor::addPerformanceParameters (juce::AudioProcessorValueTreeState::ParameterLayout& layout)
@@ -94,6 +95,17 @@ juce::Result MoteFieldAudioProcessor::exportAudio (const juce::File& file, int h
       if (! prepared) return juce::Result::fail ("Start audio playback before exporting.");
       snapshot = historyBars > 0 ? engine.snapshotHistory (historyBars * beatsPerBar.load() * 60.0 / getEffectiveBpm()) : engine.snapshotLoop(); }
     if (snapshot.audio[0].empty()) return juce::Result::fail ("There is no recorded audio to export yet.");
+    if(historyBars==0)
+    {
+        const auto region=motefield::LoopRegion::from(static_cast<int>(snapshot.audio[0].size()),parameters.getRawParameterValue("loopStart")->load(),parameters.getRawParameterValue("loopEnd")->load());
+        const auto fade=motefield::loopSpliceFrames(region.length(),snapshot.sampleRate,parameters.getRawParameterValue("loopCrossfade")->load());
+        for(auto& channel:snapshot.audio)
+        {
+            std::vector<float> rendered(static_cast<std::size_t>(region.length()));
+            for(int i=0;i<region.length();++i)rendered[i]=motefield::readLoopSplice([&](int at){return channel[at];},region,i,fade);
+            channel=std::move(rendered);
+        }
+    }
     juce::TemporaryFile temp (file);
     auto stream = temp.getFile().createOutputStream();
     if (! stream) return juce::Result::fail ("Cannot write to this location.");

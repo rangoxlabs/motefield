@@ -8,7 +8,7 @@ The clear enclosure, sculpted knob rails, and Acid lighting surround a pearl fer
 
 **Knob underlights** brighten progressively with each amount knob’s position, using the chosen accent color in light or dark mode. The effect selector keeps a steady selection light.
 
-**Current version: 0.3.9 beta.** Universal macOS AU/VST3 and Windows x64 VST3. See [VERIFICATION.md](VERIFICATION.md) for checks and remaining host-specific validation.
+**Current version: 0.3.10 beta.** Universal macOS AU/VST3 and Windows x64 VST3. See [VERIFICATION.md](VERIFICATION.md) for checks and remaining host-specific validation.
 
 ## Included effects
 
@@ -83,6 +83,10 @@ Record up to 60 seconds and layer it independently of the selected effect.
 | **Loop Reverse** | Reverse phrase playback independently of FX Reverse. |
 | **Loop Speed** | Play at half, normal, or double speed. Available in Details. |
 
+**Loop smoothing is automatic.** Crossfade starts at 20 ms, with a 5 ms minimum (limited by the length of very short selections). The end and beginning are blended on every pass, in forward or reverse playback. Starting and stopping playback also use a short protective fade. Crossfade retains the selected sample count, so it does not shorten a beat-aligned recording or make it drift. Longer blends soften more of the join; the overlap locally re-times the boundary windows to preserve the total duration.
+
+**Choose a playback region in the recorded waveform.** Drag Start/End, double-click their time values, or drag inside the highlighted section to move both edges together. Drag either small crossfade handle or type its duration. Snap aligns region edits to 1/16 notes at the current tempo; Full recording restores the entire range. Edits preserve the recorded source. Overdub writes within the selected playback region. Range, Crossfade and Snap save with sessions and user presets; factory changes and Initialize retain them.
+
 **Copying a MoteField instance between tracks retains its edited parameters and recorded loop.** Version 0.3.8 fixes restoration when a host prepares the new instance before supplying its saved state.
 
 **Recorded loop audio now saves with DAW projects and user presets.** Overdubs are mixed into the saved phrase; undo history is not serialized. Restoring at a different sample rate resamples the saved audio. Saving during an overdub takes a live snapshot; pause overdubbing first if you need an exact final take.
@@ -122,9 +126,9 @@ User presets are portable `.motefield` files stored in:
 - macOS: `~/Library/Rango Labs/MoteField/Presets`
 - Windows: `%APPDATA%/Rango Labs/MoteField/Presets`
 
-Use **Refresh user presets** after copying files into that folder. User presets save 55 sound, timing, routing, and performance settings, plus recorded phrase audio when present. Hold, Bypass, and transport gates are excluded. Presets containing a phrase replace the current phrase; sound-only presets retain it. Earlier version-1 and 0.3.6 version-2 preset files remain readable. Missing new controls receive defaults: Feedback 100%, A4 440 Hz, no count-in, free recording length and Follow loop quantize. Use 0.3.9 or later to open presets saved by this build. Factory presets retain the current timing/sync and looper configuration.
+Use **Refresh user presets** after copying files into that folder. User presets save 59 sound, timing, routing, and performance settings, plus recorded phrase audio when present. Hold, Bypass, and transport gates are excluded. Presets containing a phrase replace the current phrase; sound-only presets retain it. Earlier version-1 and 0.3.6 version-2 preset files remain readable. Missing new controls receive defaults: full playback range, Crossfade 20 ms, Snap off, Feedback 100%, A4 440 Hz, no count-in, free recording length and Follow loop quantize. Use 0.3.10 or later to open presets saved by this build. Factory presets retain the current timing/sync and looper configuration.
 
-All **67 exposed parameters** support host automation, including Mode, Variation, Hold, Bypass, and six looper command triggers. UI edits notify the host, allowing automation recording where the DAW supports it. Tap writes Tempo and Host Sync; display preferences are not audio parameters.
+All **71 exposed parameters** support host automation, including Mode, Variation, Hold, Bypass, and six looper command triggers. UI edits notify the host, allowing automation recording where the DAW supports it. Tap writes Tempo and Host Sync; display preferences are not audio parameters.
 
 Looper triggers execute on each **0-to-1 or 1-to-0 transition**. Alternate values for repeated commands; a held value does not retrigger. Commands apply at the next processing block, and repeated edges of the same command within a block coalesce. Avoid simultaneous conflicting transport commands. DAW-specific automation behavior still needs host testing.
 
@@ -146,7 +150,7 @@ Open **PERFORM** above the fluid display. Its three pages scroll within the exis
 - **Bypass trails:** stop feeding new audio, release Hold, fade the phrase, and let effect tails decay while dry audio passes through.
 - **Hold behavior:** toggle or momentary operation for the main Hold pad.
 - **Capture 1 / 2 / 4 bars:** replace the phrase with the most recent processed output. The rolling history holds up to 32 seconds and uses the host time signature when available. Early captures contain only the audio received so far; capture ends at the click, not at the previous bar line.
-- **Export / Drag Loop WAV:** click to save a stereo 24-bit WAV, or drag it onto a compatible DAW track. Dragged exports remain in the MoteField `Exports` folder beside `Presets`, so a project can continue referencing them.
+- **Export / Drag Loop WAV:** click to save a stereo 24-bit WAV of the selected region with its crossfade, or drag it onto a compatible DAW track. Export retains the original recording speed and direction; Loop Speed, Reverse and Loop Level remain playback controls. Use Full recording to export the complete range. Dragged exports remain in the MoteField `Exports` folder beside `Presets`, so a project can continue referencing them.
 
 ### Material & Magnet
 

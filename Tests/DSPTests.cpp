@@ -1,3 +1,4 @@
+#include "LoopPlayback.h"
 #include "DSP.h"
 
 #include <algorithm>
@@ -258,6 +259,7 @@ void testOverdubAccumulationAndUndo()
     engine.requestLooperCommand (motefield::LooperCommand::record);
     run (.1f, 512);
     engine.requestLooperCommand (motefield::LooperCommand::play);
+    run(0.f,512); // Allow the new automatic record-to-play attack to settle.
     expect (.1f);
     engine.requestLooperCommand (motefield::LooperCommand::dub);
     run (.2f, 512);
@@ -283,6 +285,7 @@ void testOverdubAccumulationAndUndo()
     run (.15f, 129);
     require (engine.getLooperState() == motefield::LooperState::recording, "rapid looper commands were lost");
     engine.requestLooperCommand (motefield::LooperCommand::play);
+    run(0.f,512);
     expect (.15f);
 }
 
@@ -705,6 +708,52 @@ void testScheduledRecording()
     std::cout<<"Recording timing passed: exact four-bar count-in capture, host stopped/restart, 3/4, 1/4, 1/8, cancel, tempo change, overdub and legacy beat quantize.\n";
 }
 
+void testLoopRegions()
+{
+    constexpr int rate=16000,total=4096,span=2048,block=128;
+    motefield::AudioSnapshot saved;saved.sampleRate=rate;saved.playing=true;
+    for(int c=0;c<2;++c){saved.audio[c].resize(total);for(int i=0;i<total;++i)saved.audio[c][i]=(c?-.3f:.4f)*(2.f*i/(total-1)-1.f);}
+    for(bool reverse:{false,true})for(float speed:{.5f,1.f,2.f,4.f})
+    {
+        motefield::Engine e;e.prepare(rate,block,2);require(e.restoreLoop(saved),"region fixture restore failed");
+        motefield::EngineParameters p;p.mix=0;p.looperBeforeEffect=true;p.looperLevel=1;p.looperSpeed=speed;p.looperReverse=reverse;p.loopStart=.25f;p.loopEnd=.75f;
+        std::array<float,block> in{},l{},r{};const float* ins[]{in.data(),in.data()};float* outs[]{l.data(),r.data()};
+        std::vector<float> audio;audio.reserve(rate*2);float previous=0,jump=0;
+        for(int pos=0;pos<rate*2;pos+=block)
+        {
+            watchingAudioAllocations=true;e.process(ins,outs,2,block,p);watchingAudioAllocations=false;
+            for(float value:l){require(std::isfinite(value)&&std::abs(value)<.21f,"region output escaped selection or increased peak");if(pos>rate/2)jump=std::max(jump,std::abs(value-previous));previous=value;audio.push_back(value);}
+        }
+        require(jump<.01f,"region seam contains an abrupt jump");
+        const int period=static_cast<int>(span/speed);double difference=0;
+        for(int i=rate;i<rate*2-period;++i)difference=std::max(difference,double(std::abs(audio[i]-audio[i+period])));
+        std::cout<<"Region "<<reverse<<" "<<speed<<"x period error="<<difference<<" jump="<<jump<<"\n";
+        require(difference<.00002,"crossfade changed loop period or drifted with speed");
+        p.loopStart=.5f;p.loopEnd=1.f;p.loopCrossfade=.25f;p.looperReverse=!reverse;
+        e.process(ins,outs,2,block,p);
+        require(std::abs(l.front()-previous)<.01f,"live range/reverse edit clicked");
+        require(e.snapshotLoop().audio==saved.audio,"range/crossfade altered stored audio");
+        p.loopFade=.1f;e.requestLooperCommand(motefield::LooperCommand::stop);e.process(ins,outs,2,block,p);
+        require(e.restoreLoop(saved),"could not restore during transport fade");
+        for(int n=0;n<20;++n)e.process(ins,outs,2,block,p);
+        require(e.getLooperState()==motefield::LooperState::playing,"restored loop inherited a previous stop fade");
+    }
+    // The splice uses the same exact-length rendering for export. Never boosts a
+    // correlated/DC loop, and meets at the wrap for every supported sample rate.
+    for(double rateHz:{8000.,44100.,48000.,96000.})for(float seconds:{.005f,.02f,1.f})
+    {
+        const auto region=motefield::LoopRegion::from(total,.25f,.75f);
+        const auto width=motefield::loopSpliceFrames(span,rateHz,seconds);
+        const auto read=[&](int i){return saved.audio[0][i];};
+        const auto before=motefield::readLoopSplice(read,region,span-1.e-5,width);
+        const auto after=motefield::readLoopSplice(read,region,0,width);
+        require(std::abs(before-after)<.00001f,"splice is discontinuous at wrap");
+        for(int i=0;i<span;++i)require(std::abs(motefield::readLoopSplice([](int){return .8f;},region,i,width)-.8f)<.000001f,"crossfade boosts or dips DC");
+    }
+    require(audioAllocations==0,"region playback allocated on audio thread");
+    std::cout<<"Loop regions passed: automatic seam blend, exact periods at four speeds and both directions, safe live edits, unchanged source and bounded correlated gain.\n";
+}
+
 void testFeedbackDecay()
 {
     const auto render = [] (motefield::Mode mode, float feedback)
@@ -779,6 +828,8 @@ void testConcurrentLoopRestore()
 
 int main (int argc, char** argv)
 {
+    testLoopRegions();
+    if(argc>1 && std::string(argv[1])=="--regions-only")return 0;
     testFeedbackDecay();
     if(argc>1 && std::string(argv[1])=="--feedback-only")return 0;
     testConcurrentLoopRestore();

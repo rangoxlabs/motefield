@@ -88,10 +88,29 @@ private:
 class LooperTape final : public juce::Component
 {
 public:
-    explicit LooperTape (const FieldDisplay& view) : field (view) {}
-    void paint (juce::Graphics&) override;
+    LooperTape(MoteFieldAudioProcessor&,const FieldDisplay&);
+    ~LooperTape() override { for(auto* p:gestures)p->endChangeGesture(); }
+    void paint(juce::Graphics&) override;
+    void resized() override;
+    void update();
+    void mouseDown(const juce::MouseEvent&) override;
+    void mouseDrag(const juce::MouseEvent&) override;
+    void mouseUp(const juce::MouseEvent&) override;
+    void mouseMove(const juce::MouseEvent&) override;
 private:
+    MoteFieldAudioProcessor& processor;
     const FieldDisplay& field;
+    juce::Label startValue,endValue,fadeValue;
+    juce::TextButton snapButton,fullButton;
+    float seconds=0,first=0,last=1,fade=.02f;
+    bool available=false;
+    int dragging=0;
+    float dragX=0,dragFirst=0,dragLast=1;
+    std::vector<juce::RangedAudioParameter*> gestures;
+    void setRange(float,float);
+    void edit(juce::Label&,int);
+    float snap(float) const;
+    int hit(juce::Point<float>) const;
 };
 
 class MoteFieldAudioProcessorEditor final : public juce::AudioProcessorEditor, private juce::Timer, private juce::ScrollBar::Listener
