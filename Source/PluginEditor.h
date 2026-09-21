@@ -57,7 +57,8 @@ public:
     void setReducedMotion (bool enabled) { reducedMotion = enabled; repaint(); }
     const motefield::VisualFrame& currentFrame() const { return frame; }
 private:
-    juce::Point<float> dragStart;
+    juce::Point<float> dragStart, grabDelta;
+    float visualStretch = 1.f, visualSplit = 0.f, grabAmount = 0.f;
     float startX = 0.f, startY = 0.f; int gestureMode = 0; bool dragging = false;
     struct LiquidVoice
     {

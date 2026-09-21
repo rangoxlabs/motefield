@@ -69,7 +69,7 @@ void MoteFieldAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, ju
         if (eventSample > cursor) processAudio (buffer, cursor, eventSample - cursor);
         cursor = eventSample;
         const auto message = metadata.getMessage();
-        if (message.isProgramChange()) requestedProgram.store (juce::jlimit (0, 36, message.getProgramChangeNumber()));
+        if (message.isProgramChange()) requestedProgram.store (juce::jlimit (0, factoryPresetCount-1, message.getProgramChangeNumber()));
         if (! message.isController()) continue;
         const auto cc = message.getControllerNumber(), value = message.getControllerValue();
         const auto learning = midiLearn.exchange (-1);
@@ -446,7 +446,7 @@ juce::StringArray MoteFieldAudioProcessor::factoryPresetNames()
     return { "First Light", "Soft Focus", "Slow Motion", "Paper Planes", "Broken Sun", "After Hours", "Tidal", "Blank Canvas",
         "Warm Current", "Petal Drift", "Long Exposure", "Copper Chain", "Skipping Stones", "Soft Landing", "Sideways Rain",
         "Velvet Veil", "Dust Halo", "Near Orbit", "Moon Pool", "Pin Drops", "Glass Seeds", "Pocket Cuts", "Tape Teeth",
-        "Fault Lines", "Loose Wires", "Half Steps", "Stairwell", "Clock Garden", "Cross Streets", "Ink Wash", "Night Tide", "Open Water", "Fifth Satellite", "Glass Octave", "Low Tide", "Minor Moon", "Soft Detune" };
+        "Fault Lines", "Loose Wires", "Half Steps", "Stairwell", "Clock Garden", "Cross Streets", "Ink Wash", "Night Tide", "Open Water", "Fifth Satellite", "Glass Octave", "Low Tide", "Minor Moon", "Soft Detune", "Slow Taffy", "Twin Bloom", "Deep Scan", "Glass Lift", "Elastic Orbit", "Low Gravity" };
 }
 
 void MoteFieldAudioProcessor::randomizeSound (juce::int64 seed)
@@ -478,7 +478,7 @@ void MoteFieldAudioProcessor::applyFactoryPreset (int index)
     using namespace motefield::parameter;
     // Original starting points. Performance states and loop routing are preserved.
     struct Preset { int modeIndex, variant; float activity, repeat, contour, filter, wet, reverb, drift; int pulse, room; };
-    static constexpr std::array<Preset, 37> presets {{
+    static constexpr std::array<Preset, factoryPresetCount> presets {{
         {0, 1, .62f, .64f, .40f, 14500.f, .55f, .32f, .08f, 4, 1},
         {3, 2, .72f, .62f, .68f, 7800.f, .64f, .48f, .14f, 4, 2},
         {2, 1, .35f, .78f, .55f, 11200.f, .60f, .38f, .10f, 6, 1},
@@ -515,7 +515,13 @@ void MoteFieldAudioProcessor::applyFactoryPreset (int index)
         {5, 0, .32f, .30f, .75f, 15000.f, .36f, .16f, .02f, 4, 0},
         {10, 0, .35f, .43f, .32f, 6800.f, .38f, .22f, .03f, 6, 1},
         {0, 0, .38f, .38f, .42f, 10800.f, .38f, .20f, .04f, 4, 1},
-        {3, 0, .42f, .32f, .35f, 14000.f, .44f, .18f, .02f, 4, 0}
+        {3, 0, .42f, .32f, .35f, 14000.f, .44f, .18f, .02f, 4, 0},
+        {3, 0, .30f, .40f, .25f, 7600.f, .44f, .24f, .03f, 4, 1}, // Slow Taffy
+        {0, 0, .30f, .36f, .42f, 11200.f, .40f, .18f, .02f, 4, 0}, // Twin Bloom
+        {1, 0, .42f, .38f, .48f, 9200.f, .45f, .14f, .02f, 4, 0}, // Deep Scan
+        {5, 0, .28f, .30f, .78f, 14800.f, .35f, .20f, .02f, 4, 1}, // Glass Lift
+        {4, 0, .36f, .42f, .45f, 10600.f, .43f, .24f, .05f, 4, 1}, // Elastic Orbit
+        {10, 0, .30f, .40f, .30f, 6200.f, .38f, .25f, .03f, 4, 1} // Low Gravity
     }};
     index = juce::jlimit (0, static_cast<int> (presets.size()) - 1, index);
     currentProgram.store (index);
@@ -524,10 +530,21 @@ void MoteFieldAudioProcessor::applyFactoryPreset (int index)
          "magnetAmount", "magnetMode", "magnetAttack", "magnetRelease", "patternSeed", "patternLock", "patternSteps",
          "rhythmMutation", "pitchMutation", "scale", "scaleRoot", "sourceNote", "tuningReference" })
     { auto* p = parameters.getParameter (id); setParameterValue (id, p->convertFrom0to1 (p->getDefaultValue())); }
-    if (index >= 32)
+    if (index >= 32 && index < 37)
     {
         static constexpr std::array<float, 5> transposes { 7.f, 12.f, -12.f, 3.f, .06f };
         setParameterValue ("fieldPitch", transposes[static_cast<std::size_t> (index - 32)]);
+    }
+    if (index >= 37)
+    {
+        struct Reactor { float scan, pitch, stretch, split; };
+        static constexpr std::array<Reactor,6> reactors {{
+            {.12f,0.f,2.4f,.12f}, {.08f,0.f,1.2f,.70f}, {.58f,0.f,1.f,.18f},
+            {.10f,7.f,.70f,.25f}, {.22f,0.f,1.8f,.45f}, {.18f,-12.f,1.6f,.30f}
+        }};
+        const auto& reactor=reactors[static_cast<std::size_t>(index-37)];
+        setParameterValue("fieldPosition",reactor.scan);setParameterValue("fieldPitch",reactor.pitch);
+        setParameterValue("fieldStretch",reactor.stretch);setParameterValue("fieldSplit",reactor.split);
     }
     const auto& preset = presets[static_cast<std::size_t> (index)];
     setParameterValue (mode, static_cast<float> (preset.modeIndex));

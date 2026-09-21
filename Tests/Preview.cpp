@@ -223,7 +223,7 @@ void checkPresetsAndAutomation (MoteFieldAudioProcessor& processor, const juce::
     using namespace motefield::parameter;
     const auto directory = destination.getNonexistentChildFile ("preset-checks", {}, false);
     const auto names = MoteFieldAudioProcessor::factoryPresetNames();
-    require (names.size() == 37, "factory preset count differs from the bank");
+    require (names.size() == 43 && processor.getNumPrograms() == names.size(), "factory preset count differs from the bank");
     std::set<int> modes;
     for (int i = 0; i < names.size(); ++i)
     {
@@ -232,10 +232,23 @@ void checkPresetsAndAutomation (MoteFieldAudioProcessor& processor, const juce::
         processor.setParameterValue("feedback",.2f);
         processor.applyFactoryPreset (i);
         require(processor.parameters.getRawParameterValue("feedback")->load()==1.f,"factory preset inherited feedback trim");
-        const float pitches[] { 7,12,-12,3,.06f };
+        const float pitches[] { 7,12,-12,3,.06f,0,0,0,7,0,-12 };
         require (std::abs (processor.parameters.getRawParameterValue ("fieldPitch")->load() - (i < 32 ? 0.f : pitches[i-32])) < .011f, "factory pitch leaked between patches");
         require (processor.parameters.getRawParameterValue ("tuningReference")->load() == 440.f, "factory reference is not 440 Hz");
-        require (processor.parameters.getRawParameterValue ("fieldPosition")->load() == 0.f && processor.parameters.getRawParameterValue ("fieldSplit")->load() == 0.f, "liquid gesture leaked between patches");
+        if(i<37) require (processor.parameters.getRawParameterValue ("fieldPosition")->load() == 0.f && processor.parameters.getRawParameterValue ("fieldSplit")->load() == 0.f, "liquid gesture leaked between patches");
+        if(i>=37)
+        {
+            const auto fileName="Reactor recall "+juce::String(i);
+            const std::array<const char*,4> reactorIDs {"fieldPosition","fieldPitch","fieldStretch","fieldSplit"};
+            std::array<float,4> before{};
+            for(size_t j=0;j<reactorIDs.size();++j)before[j]=processor.parameters.getRawParameterValue(reactorIDs[j])->load();
+            require(processor.saveUserPreset(fileName,false,directory.getChildFile("reactor-round-trips")).wasOk(),"reactor save failed");
+            processor.applyFactoryPreset(0);
+            require(processor.loadUserPreset(directory.getChildFile("reactor-round-trips").getChildFile(fileName+".motefield")).wasOk(),"reactor recall failed");
+            for(size_t j=0;j<reactorIDs.size();++j)
+                require(std::abs(processor.parameters.getRawParameterValue(reactorIDs[j])->load()-before[j])<.0001f,"reactor state did not round trip");
+            processor.applyFactoryPreset(i);
+        }
         require (processor.currentPresetName() == names[i] && ! processor.isPresetModified(), "factory preset metadata failed");
         modes.insert (static_cast<int> (processor.parameters.getRawParameterValue (mode)->load()));
     }
@@ -335,7 +348,7 @@ void checkPresetsAndAutomation (MoteFieldAudioProcessor& processor, const juce::
     trigger (3); require (processor.getLooperState() == motefield::LooperState::stopped, "host Stop trigger failed");
     trigger (5); require (processor.getLooperState() == motefield::LooperState::empty, "host Erase trigger failed");
     processor.setParameterValue (freeze, 0.f);processor.setParameterValue (bypass, 0.f);
-    std::cout << "Preset/automation checks passed: 37 factory presets, all 11 modes, disk round trip, overwrite protection, invalid-file rejection, session identity, 71 host parameters and looper triggers.\n";
+    std::cout << "Preset/automation checks passed: 43 factory presets, all 11 modes, disk round trip, overwrite protection, invalid-file rejection, session identity, 71 host parameters and looper triggers.\n";
 }
 void checkLoopRegions(const juce::File& destination)
 {
@@ -571,6 +584,86 @@ int main (int argc, char** argv)
             saveImage(*editor,destination.getChildFile("knob-lights-preset.png"));
             checkAppearance(*editor,destination);
             std::cout << "Knob illumination preview captured at minimum, midpoint and maximum travel.\n";
+            return 0;
+        }
+        if (argc > 2 && juce::String (argv[2]) == "--reactor-gestures")
+        {
+            processor.prepareToPlay(48000,400);
+            std::unique_ptr<MoteFieldAudioProcessorEditor> editor(static_cast<MoteFieldAudioProcessorEditor*>(processor.createEditor()));
+            editor->setVisible(true); editor->setSize(1620,972);
+            auto* field=dynamic_cast<FieldDisplay*>(find(*editor,"field")); require(field,"reactor missing");
+            field->getProperties().set("jellyPreview",true);
+            const auto settle=[&]{for(int i=0;i<80;++i)editor->refreshDisplay();};
+            const auto reset=[&]{processor.setParameterValue("fieldPosition",0.f);processor.setParameterValue("fieldPitch",0.f);processor.setParameterValue("fieldStretch",1.f);processor.setParameterValue("fieldSplit",0.f);settle();};
+            reset(); saveImage(*editor,destination.getChildFile("reactor-default.png"));
+            const auto baseline=field->createComponentSnapshot(field->getLocalBounds());
+            const auto changed=[&]{const auto img=field->createComponentSnapshot(field->getLocalBounds());int count=0;
+                for(int y=0;y<img.getHeight();y+=2)for(int x=0;x<img.getWidth();x+=2)
+                    if(img.getPixelAt(x,y)!=baseline.getPixelAt(x,y))++count;
+                return count>100;};
+            for(const auto* id:{"fieldPosition","fieldPitch","fieldStretch","fieldSplit"})
+            {
+                reset(); processor.setParameterValue(id,juce::String(id)=="fieldPitch"?12.f:juce::String(id)=="fieldStretch"?3.f:1.f);
+                settle(); require(changed(),"silent automation did not visibly change reactor");
+                saveImage(*editor,destination.getChildFile(juce::String(id)+".png"));
+                field->setReducedMotion(true);settle();require(changed(),"reduced motion hid parameter state");
+                field->setReducedMotion(false);
+            }
+            for(const int modifier:std::array<int,3>{0,juce::ModifierKeys::shiftModifier,juce::ModifierKeys::altModifier})
+            {
+                reset();const auto origin=juce::Point<float>(field->getWidth()*.30f,field->getHeight()*.55f);
+                const auto event=[&](juce::Point<float> position){return juce::MouseEvent(juce::Desktop::getInstance().getMainMouseSource(),position,juce::ModifierKeys(juce::ModifierKeys::leftButtonModifier|modifier),1.f,0.f,0.f,0.f,0.f,field,field,juce::Time::getCurrentTime(),origin,juce::Time::getCurrentTime(),1,true);};
+                const auto* id=modifier==0?"fieldPosition":modifier==juce::ModifierKeys::shiftModifier?"fieldStretch":"fieldSplit";
+                auto* parameter=processor.parameters.getParameter(id);HostParameterObserver observer;parameter->addListener(&observer);
+                HostParameterObserver pitchObserver;auto* pitch=processor.parameters.getParameter("fieldPitch");
+                if(modifier==0)pitch->addListener(&pitchObserver);
+                field->mouseDown(event(origin));field->mouseDrag(event(origin+juce::Point<float>(80.f,-48.f)));settle();
+                require(changed(),"drag did not visibly change reactor");
+                saveImage(*editor,destination.getChildFile("drag-"+juce::String(id)+".png"));
+                const auto held=processor.parameters.getRawParameterValue(id)->load();
+                field->mouseUp(event(origin+juce::Point<float>(80.f,-48.f)));settle();
+                require(observer.starts==1&&observer.ends==1&&observer.values>0,"reactor did not send complete value automation");
+                if(modifier==0){require(pitchObserver.starts==1&&pitchObserver.ends==1&&pitchObserver.values>0,"vertical pitch automation missing");pitch->removeListener(&pitchObserver);}
+                require(processor.parameters.getRawParameterValue(id)->load()==held,"release reset parameter");
+                parameter->removeListener(&observer);
+            }
+            reset();editor->setSize(1000,600);settle();saveImage(*editor,destination.getChildFile("reactor-small.png"));
+            std::cout<<"Reactor silent automation, reduced motion, drags and release persistence passed.\n";
+            return 0;
+        }
+        if (argc > 2 && juce::String (argv[2]) == "--jelly-preview")
+        {
+            processor.prepareToPlay (48000, 400); processor.applyFactoryPreset (17);
+            PlayHead head; processor.setPlayHead (&head);
+            std::unique_ptr<MoteFieldAudioProcessorEditor> editor (static_cast<MoteFieldAudioProcessorEditor*> (processor.createEditor()));
+            editor->setVisible (true); editor->setSize (1620, 972);
+            auto* field = find (*editor, "field"); require (field != nullptr, "reactor missing");
+            field->getProperties().set ("jellyPreview", true);
+            juce::AudioBuffer<float> block (2, 400); juce::MidiBuffer midi;
+            for (int chunk = 0; chunk < 240; ++chunk)
+            {
+                for (int sample = 0; sample < 400; ++sample)
+                    for (int channel = 0; channel < 2; ++channel)
+                        block.setSample (channel, sample, pluck (chunk * 400 + sample));
+                processor.processBlock (block, midi); editor->refreshDisplay();
+                if (chunk == 40 || chunk == 120 || chunk == 239)
+                    saveImage (*editor, destination.getChildFile ("jelly-" + juce::String (chunk) + ".png"));
+            }
+            return 0;
+        }
+        if (argc > 2 && juce::String (argv[2]) == "--bypass-style-only")
+        {
+            processor.prepareToPlay (48000, 400);
+            processor.setParameterValue (motefield::parameter::bypass, 1.f);
+            std::unique_ptr<MoteFieldAudioProcessorEditor> editor (static_cast<MoteFieldAudioProcessorEditor*> (processor.createEditor()));
+            editor->setVisible (true);
+            juce::AudioBuffer<float> block (2, 400); block.clear(); juce::MidiBuffer midi;
+            processor.processBlock (block, midi);
+            for (int width : { 1000, 1620 })
+            {
+                editor->setSize (width, width * 3 / 5); editor->refreshDisplay();
+                saveImage (*editor, destination.getChildFile ("bypass-" + juce::String (width) + ".png"));
+            }
             return 0;
         }
         if (argc > 2 && juce::String (argv[2]) == "--appearance-only")

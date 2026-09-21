@@ -1,6 +1,6 @@
 # MoteField by Rango Labs
 
-MoteField turns incoming audio into layered micro loops, granular textures, rhythmic glitches, and spatial repeats. It combines **11 effect modes**, A-D variations, **37 factory presets**, and a **60-second phrase looper** in a compact hardware-style interface.
+MoteField turns incoming audio into layered micro loops, granular textures, rhythmic glitches, and spatial repeats. It combines **11 effect modes**, A-D variations, **43 factory presets**, and a **60-second phrase looper** in a compact hardware-style interface.
 
 The clear enclosure, sculpted knob rails, and Acid lighting surround a pearl ferrofluid-inspired display. The floating fluid volume deforms, merges, and splits with processed sound and active voices; the adjacent Shape guide shows the grain envelope. Settings offers a custom accent color and dark mode, saved separately from sound presets.
 
@@ -8,7 +8,7 @@ The clear enclosure, sculpted knob rails, and Acid lighting surround a pearl fer
 
 **Knob underlights** brighten progressively with each amount knob’s position, using the chosen accent color in light or dark mode. The effect selector keeps a steady selection light.
 
-**Current version: 0.3.10 beta.** Universal macOS AU/VST3 and Windows x64 VST3. See [VERIFICATION.md](VERIFICATION.md) for checks and remaining host-specific validation.
+**Current macOS version: 0.3.11 beta.** Universal AU/VST3 with reactor gesture feedback, lime slime, and 43 presets. Windows x64 VST3 remains at 0.3.10. See [VERIFICATION.md](VERIFICATION.md) for checks and remaining host-specific validation.
 
 ## Included effects
 
@@ -115,7 +115,20 @@ These are global offsets added to each mode's own pitch behavior. User presets a
 
 ## Presets and automation
 
-The preset menu has **Factory** and **User** submenus. Choose from 37 factory starting points covering all eleven modes, or use **Save** to name the current sound. Replacing an existing user preset requires confirmation. An asterisk marks changes from the selected preset, and its name is retained with the DAW session.
+The 0.3.11 bank adds six reactor starting points:
+
+| Preset | Starting character | Try |
+| --- | --- | --- |
+| Slow Taffy | Veil with 2.4× stretch | Shift-drag to change grain duration |
+| Twin Bloom | Bloom with 70% split | Option-drag to merge or separate voices |
+| Deep Scan | Chain with an offset scan position | Drag horizontally through the captured buffer |
+| Glass Lift | Pluck at +7 semitones with shorter grains | Drag vertically to transpose |
+| Elastic Orbit | Orbit with stretch and moderate split | Explore stretch, then voice separation |
+| Low Gravity | Smear one octave down at 1.6× stretch | Shift-drag to change repeat timing |
+
+Reactor gestures write ordinary plug-in parameters: normal dragging controls Scan and Pitch, Shift-drag controls Stretch, and Option/Alt-drag controls Split. In Ableton Arrangement View, enable **Automation Arm** and **Arrangement Record** to record those movements. In Session View, enable Automation Arm, arm the track, and use Session Record (or configure Session automation recording for all playing clips). See [Live's automation recording instructions](https://www.ableton.com/en/live-manual/12/automation-and-editing-envelopes/). Presets store the starting values; the DAW stores the recorded movements.
+
+The preset menu has **Factory** and **User** submenus. Choose from 43 factory starting points covering all eleven modes, or use **Save** to name the current sound. Replacing an existing user preset requires confirmation. An asterisk marks changes from the selected preset, and its name is retained with the DAW session.
 
 **Initialize sound** in the preset menu keeps the selected effect mode and loads a simple variation-A starting sound with modest Activity and Repeats, Mix at 40%, Feedback at 50%, Width at 100%, and no added Space or Drift. Material, pitch, pattern and sidechain sound controls return to defaults. Timing/subdivision, output level, monitoring, Hold/Bypass, all looper settings, recorded audio, MIDI mappings and appearance are retained. The preset name becomes **Init - Orbit** (or the current mode). **Undo initialization** restores the previous sound and preset identity; loading, saving or randomizing a sound, or restoring a session, clears this one-step undo. Use **SAVE** to keep your initialized sound. POST recordings keep their captured sound; PRE recordings continue through the live effects.
 
@@ -176,7 +189,7 @@ The surface remains a ferrofluid-inspired interpretation with damped motion, not
 
 Choose **Source note**, **Scale root**, and a major, minor, or pentatonic scale to constrain grain transpositions. Source note is set manually; this does not detect and retune every note in polyphonic audio. Sweeps can travel between the constrained endpoints. Grid's delay taps do not use the grain scale controls.
 
-Select a parameter and click **Learn next MIDI CC**, then move a controller. Mappings save with the DAW project. Defaults: CC1 controls Drift depth, CC11 controls Mix, and CC64 controls Hold. Transport CCs act on a rising press and ignore release, while the Burst gate records until released. MIDI CC events are applied at their sample offsets. Program changes 1–37 select factory presets through the message-thread preset loader, so preset changes are not sample-accurate. Host automation remains available independently of MIDI routing.
+Select a parameter and click **Learn next MIDI CC**, then move a controller. Mappings save with the DAW project. Defaults: CC1 controls Drift depth, CC11 controls Mix, and CC64 controls Hold. Transport CCs act on a rising press and ignore release, while the Burst gate records until released. MIDI CC events are applied at their sample offsets. Program changes 1–43 select factory presets through the message-thread preset loader, so preset changes are not sample-accurate. Host automation remains available independently of MIDI routing.
 
 ## Audio-reactive display
 

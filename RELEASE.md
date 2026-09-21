@@ -1,5 +1,14 @@
 # Release preparation
 
+## macOS 0.3.11 beta — 2026-09-21
+
+Installed universal AU and VST3 with 43 factory presets, parameter-driven reactor scan/pitch/stretch/split feedback, drag readouts, green dot-matrix bypass indicator, and lime jelly as the default reactor material over the original transparent enclosure. The six new presets are appended; existing program indices and parameter IDs are preserved. Separate reactor/casing color controls remain a browser prototype and are not in this build. Native Settings retains its previous accent controls.
+
+Release build and DSP/click tests passed (84.63 seconds combined). Final native UI/preset regression and reactor host-notification/visual tests passed. Installed bundle versions are 0.3.11, both arm64+x86_64, strict ad-hoc signatures valid, full file manifests identical to dist/macos. Installed AU validation passed, with the existing MIDI-on-aufx warning. DAWs were closed before replacement. Previous 0.3.10 bundles backed up at ~/Library/Application Support/Rango Labs/MoteField/Backups/install-tU5vBWID. User presets and exports preserved.
+
+Mac sharing ZIP: dist/friend-test/MoteField-0.3.11-Mac-Test.zip; manifest/signature/architecture verification and ZIP CRC passed. Windows remains 0.3.10; no new Windows build or public push. Actual Ableton automation recording/playback and listening approval remain unverified. No signing/notarization status changed.
+
+
 ## Current status
 
 Version **0.3.10 beta** adds automatic loop-boundary smoothing, non-destructive playback-region selection, adjustable crossfade and region-aware WAV export. Source recordings remain intact. It includes the 0.3.9 Feedback and lighting refinements on the preferred engine. See [VERIFICATION.md](VERIFICATION.md) for build, installation and platform checks.

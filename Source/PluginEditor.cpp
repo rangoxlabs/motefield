@@ -398,10 +398,26 @@ void FieldDisplay::update (const motefield::VisualFrame& next)
         cluster.y += voice.y * voice.energy;cluster.bend += voice.bend * voice.energy;
         weight += voice.energy;meanX += voice.x * voice.energy;meanY += voice.y * voice.energy;
     }
-    const auto targetX = 240.f + (reducedMotion ? 0.f : std::sin(motionPhase) * (energy * 15.f + transientDrive * 12.f)) + (weight > .001f && ! reducedMotion ? (meanX / weight - .5f) * 45.f : 0.f) + (reducedMotion ? 0.f : (next.fieldPosition * 2.f - next.fieldSplit) * 55.f);
-    const auto targetY = juce::jlimit (65.f, 79.f, 72.f + (weight > .001f && ! reducedMotion ? (meanY / weight - .5f) * 22.f : 0.f) - (reducedMotion ? 0.f : next.fieldPitch * .6f));
-    centreX += (targetX - centreX) * (1.f - std::exp (-dt * 14.f));
-    centreY += (targetY - centreY) * (1.f - std::exp (-dt * 14.f));
+    // Parameter-driven silhouettes remain readable even when audio is silent.
+    // Reduced motion removes drift, but never hides the current control values.
+    const auto targetX = 240.f + next.fieldPosition * 80.f + (reducedMotion ? 0.f : std::sin(motionPhase) * energy * 8.f);
+    const auto targetY = 72.f - next.fieldPitch * 1.05f;
+    const auto response = reducedMotion ? 1.f : 1.f - std::exp (-dt * 20.f);
+    centreX += (targetX - centreX) * response;
+    centreY += (targetY - centreY) * response;
+    visualStretch += (next.fieldStretch - visualStretch) * response;
+    visualSplit += (next.fieldSplit - visualSplit) * response;
+    grabAmount += ((dragging ? 1.f : 0.f) - grabAmount) * (reducedMotion ? 1.f : 1.f - std::exp(-dt * 14.f));
+    if (std::abs(targetX-centreX)<.001f) centreX=targetX;
+    if (std::abs(targetY-centreY)<.001f) centreY=targetY;
+    if (std::abs(next.fieldStretch-visualStretch)<.001f) visualStretch=next.fieldStretch;
+    if (std::abs(next.fieldSplit-visualSplit)<.001f) visualSplit=next.fieldSplit;
+    if (!dragging && grabAmount<.001f) grabAmount=0.f;
+    const bool controlSettling = std::abs(targetX-centreX) + std::abs(targetY-centreY)
+        + std::abs(next.fieldStretch-visualStretch) + std::abs(next.fieldSplit-visualSplit) > .001f
+        || grabAmount > .001f;
+    const bool controlsChanged = next.fieldPosition != frame.fieldPosition || next.fieldPitch != frame.fieldPitch
+        || next.fieldStretch != frame.fieldStretch || next.fieldSplit != frame.fieldSplit;
     const auto spring = [dt] (float& position, float& velocity, float destination, float speed)
     {
         const auto steps = juce::jmax (1, static_cast<int> (std::ceil (dt / .006f)));
@@ -431,9 +447,9 @@ void FieldDisplay::update (const motefield::VisualFrame& next)
     frame = next;
     const auto moving = std::any_of (liquidVoices.begin(), liquidVoices.end(), [] (const auto& voice) { return voice.energy >= .0001f; });
     const auto settling = std::any_of (surfaceBodies.begin(), surfaceBodies.end(), [] (const auto& body) { return body.radius > .002f; });
-    if (! materialRendered || materialActive || advanced || outputDrive > 0.f || lowDrive + midDrive + highDrive > 0.f || moving || settling)
+    if (! materialRendered || controlsChanged || controlSettling || materialActive || advanced || outputDrive > 0.f || lowDrive + midDrive + highDrive > 0.f || moving || settling)
     {
-        renderLiquid();materialRendered = true;materialActive = moving || settling || outputDrive > 0.f || lowDrive + midDrive + highDrive > 0.f;
+        renderLiquid();materialRendered = true;materialActive = controlSettling || moving || settling || outputDrive > 0.f || lowDrive + midDrive + highDrive > 0.f;
     }
     repaint();
 }
@@ -444,6 +460,7 @@ void FieldDisplay::renderLiquid()
     // draw-order seams when grains join, split or move through one another.
     liquidField.fill (0.f);liquidHeat.fill (0.f);liquidGradientY.fill (0.f);
     const auto accent=appearance::read(*this).cyan;
+    const bool jellyPreview = static_cast<bool> (getProperties().getWithDefault("jellyPreview", true));
     const auto area=getLocalBounds().toFloat().reduced(1.f);
     const auto view=area.reduced(16.f*area.getWidth()/718.f,14.f*area.getWidth()/718.f);
     const float pixelAspect=(view.getWidth()*.69f*.95f/liquidWidth)/(view.getHeight()/liquidHeight);
@@ -488,7 +505,22 @@ void FieldDisplay::renderLiquid()
     // Give active fragments room to reshape the core instead of hiding them
     // inside an oversized permanent sphere. The mass reunites when they decay.
     const auto radius = 54.f - juce::jmin(23.f,activeVolume*.22f) + lowDrive * 14.f + midDrive * 6.f + transientDrive * 6.f;
-    deposit (centreX, centreY, radius, reducedMotion ? 1.f : juce::jlimit(.76f,1.38f,1.f + lowDrive * .30f - midDrive * .26f + std::sin(motionPhase)*outputDrive*.12f + (frame.width-1.f)*.15f*outputDrive));
+    // Vertical stretch and persistent, symmetric lobes expose the parameter state.
+    const auto elongation = 1.f / std::sqrt(juce::jlimit(.25f,4.f,visualStretch));
+    const auto coreRadius = radius * (1.f - visualSplit * .30f);
+    deposit (centreX, centreY, coreRadius, elongation);
+    if (visualSplit > .001f)
+        for (const auto direction : {-1.f,1.f})
+            deposit (centreX + direction * (28.f + visualSplit * 70.f), centreY,
+                     radius * .64f, elongation, visualSplit);
+    // A local pull joins the mass with a soft neck; it relaxes without resetting parameters.
+    if (grabAmount > .001f && gestureMode == 1)
+    {
+        const auto pullX = juce::jlimit(-38.f,38.f,grabDelta.x * 480.f / juce::jmax(1,getWidth()));
+        const auto pullY = juce::jlimit(-32.f,32.f,grabDelta.y * 144.f / juce::jmax(1,getHeight()));
+        deposit (centreX + pullX * grabAmount, centreY + pullY * grabAmount,
+                 coreRadius * .70f, elongation, grabAmount * .8f);
+    }
     const auto tension = reducedMotion ? 0.f : (midDrive * .65f + highDrive * .85f) * (.25f + frame.tension * 1.5f) + frame.magnet * .5f;
     if (tension > .0001f)
         for (int pole = 0; pole < 5; ++pole)
@@ -526,14 +558,33 @@ void FieldDisplay::renderLiquid()
             const auto v = juce::jlimit (0.f, 1.f, .30f + light * .36f + key * .38f + fill * .30f + rim * rim * .22f);
             const auto film=std::exp(-square((rim-.65f-highDrive*.10f)/.14f));
             const auto sheen=juce::jlimit(0.f,.38f,film*(.16f+highDrive*.22f+midDrive*.10f));
-            pixels.setPixelColour (x, y, juce::Colour::fromFloatRGBA(v,v,v,alpha).interpolatedWith(accent.withAlpha(alpha),sheen));
+            if (jellyPreview)
+            {
+                // Absorptive green body, transmitted rim light and glossy wet highlights.
+                const auto thickness = juce::jlimit (0.f, 1.f, z / 65.f);
+                const auto transmission = std::exp (-thickness * 1.8f);
+                const auto backlight = std::pow (juce::jmax (0.f, ny * .65f - nx * .3f + nz * .25f), 2.f);
+                const auto edgeLight = std::pow (rim, 2.f);
+                auto gel = juce::Colour::fromFloatRGBA (
+                    .12f + transmission * .35f + light * .065f + backlight * .27f,
+                    .22f + transmission * .43f + light * .14f + backlight * .30f,
+                    .025f + transmission * .075f + backlight * .045f,
+                    alpha * (.70f + thickness * .18f));
+                gel = gel.interpolatedWith (accent.withAlpha (alpha),
+                                           juce::jlimit (0.f, .65f, edgeLight * .55f + fill * .45f));
+                const auto gloss = juce::jlimit (0.f, .92f, std::pow (key, 2.f) * 1.2f);
+                gel = gel.interpolatedWith (juce::Colour (0xfff5ffd6).withAlpha (alpha), gloss);
+                pixels.setPixelColour (x, y, gel);
+            }
+            else
+                pixels.setPixelColour (x, y, juce::Colour::fromFloatRGBA(v,v,v,alpha).interpolatedWith(accent.withAlpha(alpha),sheen));
         }
 }
 
 void FieldDisplay::mouseDown (const juce::MouseEvent& e)
 {
     if (! gesture || e.position.x > getWidth() * .72f || e.position.y < getHeight() * .22f) return;
-    dragging = true; dragStart = e.position; gestureMode = e.mods.isAltDown() ? 2 : e.mods.isShiftDown() ? 1 : 0;
+    dragging = true; grabDelta = {}; dragStart = e.position; gestureMode = e.mods.isAltDown() ? 2 : e.mods.isShiftDown() ? 1 : 0;
     startX = gestureMode == 1 ? frame.fieldStretch : gestureMode == 2 ? frame.fieldSplit : frame.fieldPosition;
     startY = frame.fieldPitch;
     gesture (gestureMode == 1 ? "fieldStretch" : gestureMode == 2 ? "fieldSplit" : "fieldPosition", startX, 0);
@@ -542,7 +593,7 @@ void FieldDisplay::mouseDown (const juce::MouseEvent& e)
 void FieldDisplay::mouseDrag (const juce::MouseEvent& e)
 {
     if (! dragging || ! gesture) return;
-    const auto delta = e.position - dragStart;
+    const auto delta = e.position - dragStart; grabDelta = delta;
     if (gestureMode == 1) gesture ("fieldStretch", juce::jlimit (.25f, 4.f, startX * std::pow (2.f, -delta.y / 60.f)), 1);
     else if (gestureMode == 2) gesture ("fieldSplit", juce::jlimit (0.f,1.f,startX + delta.x / 160.f),1);
     else { gesture ("fieldPosition", juce::jlimit (0.f,1.f,startX + delta.x / (getWidth() * .6f)),1); gesture ("fieldPitch", juce::jlimit (-24.f,24.f,startY - delta.y / 4.f),1); }
@@ -570,15 +621,51 @@ void FieldDisplay::paint (juce::Graphics& g)
     const auto title = juce::String (motefield::modeNames[static_cast<std::size_t> (mode)])
                        + " / " + juce::String::charToString (static_cast<juce::juce_wchar> ('A' + frame.variation));
 
-    if (frame.held || frame.bypass)
-    {
-        const auto badge = juce::Rectangle<float> (146.0f * s, 14.0f * s, 66.0f * s, 21.0f * s);
-        g.setColour (frame.bypass ? line : yellow);
-        g.fillRoundedRectangle (badge, 9.0f * s);
-        text (g, frame.bypass ? "BYPASS" : "HELD", badge, 10.0f * s, ink, true, juce::Justification::centred, .08f);
-    }
     const auto view = area.reduced (16.0f * s, 14.0f * s);
     const auto stage = view.withWidth (view.getWidth() * .69f);
+    if (frame.bypass)
+    {
+        // A 5x7 LED matrix emits directly from the display, without a badge surface.
+        static constexpr unsigned char glyphs[8][7] {
+            { 30, 17, 17, 30, 17, 17, 30 }, // B
+            { 17, 17, 10, 4, 4, 4, 4 },    // Y
+            { 30, 17, 17, 30, 16, 16, 16 }, // P
+            { 14, 17, 17, 31, 17, 17, 17 }, // A
+            { 15, 16, 16, 14, 1, 1, 30 },   // S
+            { 15, 16, 16, 14, 1, 1, 30 },   // S
+            { 31, 16, 16, 30, 16, 16, 31 }, // E
+            { 30, 17, 17, 17, 17, 17, 30 }  // D
+        };
+        const auto pitch = 2.35f * s;
+        const auto left = stage.getCentreX() - 46.0f * pitch * .5f;
+        const auto top = 19.0f * s;
+        for (int letter = 0; letter < 8; ++letter)
+            for (int row = 0; row < 7; ++row)
+                for (int column = 0; column < 5; ++column)
+                {
+                    if ((glyphs[letter][row] & (1 << (4 - column))) == 0) continue;
+                    const auto x = left + static_cast<float> (letter * 6 + column) * pitch;
+                    const auto y = top + static_cast<float> (row) * pitch;
+                    const auto dot = juce::Rectangle<float> (x - .72f * s, y - .72f * s,
+                                                             1.44f * s, 1.44f * s);
+                    g.setColour (yellow.withAlpha (.045f));
+                    g.fillEllipse (dot.expanded (2.7f * s));
+                    g.setColour (yellow.withAlpha (.13f));
+                    g.fillEllipse (dot.expanded (1.1f * s));
+                    g.setColour (yellow.withAlpha (.95f));
+                    g.fillEllipse (dot);
+                    g.setColour (yellow.interpolatedWith (juce::Colours::white, .35f));
+                    g.fillEllipse (dot.reduced (.32f * s));
+                }
+
+    }
+    else if (frame.held)
+    {
+        const auto badge = juce::Rectangle<float> (146.0f * s, 14.0f * s, 66.0f * s, 21.0f * s);
+        g.setColour (yellow);
+        g.fillRoundedRectangle (badge, 9.0f * s);
+        text (g, "HELD", badge, 10.0f * s, ink, true, juce::Justification::centred, .08f);
+    }
     juce::Graphics::ScopedSaveState save (g);
     g.reduceClipRegion (view.toNearestInt());
     const auto colour = juce::Colour(0xffeff1e9);
@@ -586,6 +673,15 @@ void FieldDisplay::paint (juce::Graphics& g)
     // Inset the entire material, including split satellites, to leave travel room.
     g.drawImage (liquidImage,stage.reduced(stage.getWidth()*.025f,0));
 
+    if (dragging)
+    {
+        const auto label = gestureMode == 1 ? "STRETCH  " + juce::String(frame.fieldStretch,2) + "x"
+            : gestureMode == 2 ? "SPLIT  " + juce::String(juce::roundToInt(frame.fieldSplit*100.f)) + "%"
+            : "SCAN  " + juce::String(juce::roundToInt(frame.fieldPosition*100.f)) + "%     PITCH  "
+                + (frame.fieldPitch >= 0.f ? "+" : "") + juce::String(frame.fieldPitch,1) + " st";
+        text (g, label, stage.withY(stage.getBottom()-23.f*s).withHeight(20.f*s),
+              10.f*s, cyan, true, juce::Justification::centred);
+    }
     if (! envelopeVisible) return;
     const auto contour = view.withTrimmedLeft (view.getWidth() * .75f).withTrimmedBottom(112.f*s);
     g.setColour (line.withAlpha (.7f));
