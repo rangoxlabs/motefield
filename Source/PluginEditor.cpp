@@ -675,9 +675,9 @@ void FieldDisplay::paint (juce::Graphics& g)
 
     if (dragging)
     {
-        const auto label = gestureMode == 1 ? "STRETCH  " + juce::String(frame.fieldStretch,2) + "x"
-            : gestureMode == 2 ? "SPLIT  " + juce::String(juce::roundToInt(frame.fieldSplit*100.f)) + "%"
-            : "SCAN  " + juce::String(juce::roundToInt(frame.fieldPosition*100.f)) + "%     PITCH  "
+        const auto label = gestureMode == 1 ? "SHIFT + UP/DOWN   STRETCH  " + juce::String(frame.fieldStretch,2) + "x"
+            : gestureMode == 2 ? "OPTION/ALT + LEFT/RIGHT   SPLIT  " + juce::String(juce::roundToInt(frame.fieldSplit*100.f)) + "%"
+            : "LEFT/RIGHT  SCAN " + juce::String(juce::roundToInt(frame.fieldPosition*100.f)) + "%   UP/DOWN  PITCH "
                 + (frame.fieldPitch >= 0.f ? "+" : "") + juce::String(frame.fieldPitch,1) + " st";
         text (g, label, stage.withY(stage.getBottom()-23.f*s).withHeight(20.f*s),
               10.f*s, cyan, true, juce::Justification::centred);
@@ -1127,7 +1127,15 @@ void MoteFieldAudioProcessorEditor::refreshPresetMenu()
     menu->clear();
     juce::PopupMenu factory, user;
     const auto names = MoteFieldAudioProcessor::factoryPresetNames();
-    for (int i = 0; i < names.size(); ++i) factory.addItem (i + 1, names[i]);
+    const auto categories = MoteFieldAudioProcessor::factoryPresetCategories();
+    for (int category = 0; category < categories.size(); ++category)
+    {
+        juce::PopupMenu folder;
+        for (int i = 0; i < names.size(); ++i)
+            if (MoteFieldAudioProcessor::factoryPresetCategory(i) == category)
+                folder.addItem(i + 1, names[i]);
+        factory.addSubMenu(categories[category], folder);
+    }
     for (int i = 0; i < userPresets.size(); ++i) user.addItem (1001 + i, userPresets[i].getFileNameWithoutExtension());
     if (userPresets.isEmpty()) user.addItem (19999, "No saved presets yet", false);
     menu->addItem (20002, "Initialize sound");

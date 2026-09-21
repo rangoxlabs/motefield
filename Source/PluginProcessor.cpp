@@ -449,6 +449,22 @@ juce::StringArray MoteFieldAudioProcessor::factoryPresetNames()
         "Fault Lines", "Loose Wires", "Half Steps", "Stairwell", "Clock Garden", "Cross Streets", "Ink Wash", "Night Tide", "Open Water", "Fifth Satellite", "Glass Octave", "Low Tide", "Minor Moon", "Soft Detune", "Slow Taffy", "Twin Bloom", "Deep Scan", "Glass Lift", "Elastic Orbit", "Low Gravity" };
 }
 
+juce::StringArray MoteFieldAudioProcessor::factoryPresetCategories()
+{
+    return {"Bloom - Micro loops", "Chain - Linked fragments", "Slide - Pitch movement",
+        "Veil - Grain layers", "Orbit - Moving clusters", "Pluck - Grain attacks",
+        "Chop - Rhythmic cuts", "Break - Glitches", "Ladder - Stepped repeats",
+        "Grid - Pattern delays", "Smear - Diffuse repeats", "Reactor Explorations"};
+}
+
+int MoteFieldAudioProcessor::factoryPresetCategory (int index)
+{
+    // Browsing metadata only; host program numbers remain unchanged.
+    static constexpr std::array<int,37> modes {0,3,2,1,6,9,10,0,0,0,0,1,1,2,2,3,3,4,4,5,5,6,6,7,7,8,8,9,9,10,10,10,4,5,10,0,3};
+    index=juce::jlimit(0,factoryPresetCount-1,index);
+    return index>=37 ? 11 : modes[static_cast<std::size_t>(index)];
+}
+
 void MoteFieldAudioProcessor::randomizeSound (juce::int64 seed)
 {
     using namespace motefield::parameter;

@@ -250,7 +250,9 @@ void checkPresetsAndAutomation (MoteFieldAudioProcessor& processor, const juce::
             processor.applyFactoryPreset(i);
         }
         require (processor.currentPresetName() == names[i] && ! processor.isPresetModified(), "factory preset metadata failed");
-        modes.insert (static_cast<int> (processor.parameters.getRawParameterValue (mode)->load()));
+        const auto modeIndex=static_cast<int>(processor.parameters.getRawParameterValue(mode)->load());
+        require(MoteFieldAudioProcessor::factoryPresetCategory(i)==(i<37?modeIndex:11),"preset placed in wrong folder");
+        modes.insert(modeIndex);
     }
     require (modes.size() == 11, "factory bank does not cover every mode");
     processor.applyFactoryPreset (18);

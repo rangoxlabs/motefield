@@ -49,7 +49,7 @@ public:
     void mouseDrag (const juce::MouseEvent&) override;
     void mouseUp (const juce::MouseEvent&) override;
     void mouseDoubleClick (const juce::MouseEvent&) override;
-    juce::String getTooltip() override { return "Drag liquid to scan / transpose. Shift-drag stretches. Alt-drag splits voices. Double-click resets."; }
+    juce::String getTooltip() override { return "Drag LEFT / RIGHT to scan the audio.\nDrag UP / DOWN to raise / lower pitch.\nSHIFT + drag UP / DOWN to stretch / shorten.\nOPTION (Mac) / ALT (Windows) + drag RIGHT / LEFT to split / merge voices.\nDouble-click resets the reactor controls, including pitch."; }
     void setEnvelopeVisible (bool show) { envelopeVisible = show; repaint(); }
     void invalidateMaterial() { materialRendered = false; }
     void setShape (float value) { shape = value; }

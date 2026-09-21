@@ -81,6 +81,8 @@ public:
     bool canUndoInitialization() const { return initializationUndoAvailable.load(); }
     void applyFactoryPreset (int index);
     static juce::StringArray factoryPresetNames();
+    static int factoryPresetCategory (int index);
+    static juce::StringArray factoryPresetCategories();
     juce::Result exportAudio (const juce::File&, int historyBars = 0);
     juce::Result captureHistory (int bars);
     juce::MemoryBlock loopData();
