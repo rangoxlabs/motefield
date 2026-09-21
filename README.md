@@ -275,3 +275,9 @@ Original source is available under the [MIT License](LICENSE). JUCE and its bund
 Acid is the default accent on the neutral light enclosure. Open **Settings** to switch **Dark mode** on or off, choose a color with the picker/RGB sliders, or enter a six-digit hex color. **Reset to Acid** restores the accent without changing the light/dark setting.
 
 The accent follows knob light rings, selected controls, the recorded-loop playhead, and audio-reactive silver-fluid reflections. Labels use contrasting neutral colors. Appearance is saved on this computer separately from sound presets and DAW automation; open instances in the same plugin process update together. The recorded-loop waveform remains visible on its dedicated lower strip.
+
+### 0.3.12 development: pitch lock and reverb contrast
+
+**PITCH LOCK**, beside the reactor, protects transpose during reactor dragging and double-click reset. Scan remains available left/right. The lock is stored with the DAW session, independently of sound presets; explicit tuning edits and host pitch automation remain active.
+
+Reverb styles now use distinct delay sizes, predelays, damping and decay: Bright is compact and crisp; Dark is smaller and damped; Hall has a delayed, spacious bloom; Infinite has a long diffuse tail (not literal endless freeze). The upper end of Space brings a much stronger reverb wash and reduces the direct effect. Style changes crossfade and Space changes are smoothed. Existing presets with Space enabled will sound different; parameter IDs and saved values remain compatible.

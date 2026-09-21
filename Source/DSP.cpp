@@ -664,71 +664,76 @@ private:
 
 class StereoReverb
 {
-public:
-    void prepare (double sampleRate)
+    struct Bank
     {
-        const auto scale = sampleRate / 44100.0;
-        constexpr std::array<int, 6> combLengths { 1116, 1188, 1277, 1356, 1422, 1491 };
-        constexpr std::array<int, 3> allPassLengths { 225, 341, 556 };
-
-        for (std::size_t i = 0; i < combL.size(); ++i)
+        std::array<CombFilter,6> left, right;
+        std::array<AllPassFilter,3> diffuseL, diffuseR;
+        std::vector<float> preL, preR;
+        int head=0;
+        void reset()
         {
-            combL[i].prepare (static_cast<int> (combLengths[i] * scale));
-            combR[i].prepare (static_cast<int> ((combLengths[i] + 23) * scale));
+            for(auto& f:left)f.reset();for(auto& f:right)f.reset();
+            for(auto& f:diffuseL)f.reset();for(auto& f:diffuseR)f.reset();
+            std::fill(preL.begin(),preL.end(),0.f);std::fill(preR.begin(),preR.end(),0.f);head=0;
         }
-        for (std::size_t i = 0; i < allPassL.size(); ++i)
+    };
+public:
+    void prepare(double sampleRate)
+    {
+        constexpr std::array<int,6> lengths {1116,1188,1277,1356,1422,1491};
+        constexpr std::array<int,3> diffusion {225,341,556};
+        constexpr std::array<float,4> sizes {.55f,.90f,1.60f,2.20f};
+        constexpr std::array<float,4> predelay {.004f,.009f,.032f,.055f};
+        smoothing=1.f-std::exp(-1.f/static_cast<float>(sampleRate*.035));
+        for(size_t k=0;k<banks.size();++k)
         {
-            allPassL[i].prepare (static_cast<int> (allPassLengths[i] * scale));
-            allPassR[i].prepare (static_cast<int> ((allPassLengths[i] + 17) * scale));
+            auto& bank=banks[k];const auto scale=sampleRate/44100.*sizes[k];
+            for(size_t i=0;i<lengths.size();++i)
+            {bank.left[i].prepare(static_cast<int>(lengths[i]*scale));bank.right[i].prepare(static_cast<int>((lengths[i]+23+int(k)*11)*scale));}
+            for(size_t i=0;i<diffusion.size();++i)
+            {bank.diffuseL[i].prepare(static_cast<int>(diffusion[i]*scale));bank.diffuseR[i].prepare(static_cast<int>((diffusion[i]+17)*scale));}
+            bank.preL.assign(static_cast<size_t>(std::max(1,int(sampleRate*predelay[k]))),0.f);bank.preR=bank.preL;
         }
         reset();
     }
-
-    void reset()
+    void reset(){for(auto& bank:banks)bank.reset();weights.fill(0.f);initialized=false;space=0.f;}
+    float amount() const noexcept {return space;}
+    void process(float inputL,float inputR,float amount,int style,float& outputL,float& outputR) noexcept
     {
-        for (auto& filter : combL) filter.reset();
-        for (auto& filter : combR) filter.reset();
-        for (auto& filter : allPassL) filter.reset();
-        for (auto& filter : allPassR) filter.reset();
-    }
-
-    void process (float inputL,
-                  float inputR,
-                  float amount,
-                  int style,
-                  float& outputL,
-                  float& outputR) noexcept
-    {
-        static constexpr std::array<float, 4> feedbacks { 0.68f, 0.76f, 0.84f, 0.91f };
-        static constexpr std::array<float, 4> dampings { 0.14f, 0.52f, 0.28f, 0.38f };
-        static constexpr std::array<float, 4> widths { 0.38f, 0.52f, 0.68f, 0.82f };
-        style = clamp (style, 0, 3);
-        const auto feedback = feedbacks[static_cast<std::size_t> (style)] * (0.82f + amount * 0.16f);
-        const auto damping = dampings[static_cast<std::size_t> (style)];
-        const auto width = widths[static_cast<std::size_t> (style)];
-        const auto mono = (inputL + inputR) * (0.075f + amount * 0.025f);
-
-        auto sumL = 0.0f;
-        auto sumR = 0.0f;
-        for (std::size_t i = 0; i < combL.size(); ++i)
+        style=clamp(style,0,3);amount=clamp(amount,0.f,1.f);
+        if(!initialized){weights[static_cast<size_t>(style)]=1.f;space=amount;initialized=true;}
+        space+=smoothing*(amount-space);
+        if(std::abs(space-amount)<.00001f)space=amount;
+        constexpr std::array<float,4> feedbacks {.64f,.78f,.89f,.975f};
+        constexpr std::array<float,4> damping {.08f,.72f,.27f,.42f};
+        constexpr std::array<float,4> width {.55f,.65f,1.f,1.05f};
+        outputL=outputR=0.f;
+        // Warm all four spaces so changing style crossfades complete tails,
+        // without reallocating delay lines or abruptly moving a read head.
+        for(size_t k=0;k<banks.size();++k)
         {
-            sumL += combL[i].process (mono + inputL * 0.025f, feedback, damping);
-            sumR += combR[i].process (mono + inputR * 0.025f, feedback, damping);
+            auto& bank=banks[k];weights[k]+=smoothing*((int(k)==style?1.f:0.f)-weights[k]);
+            const auto l=bank.preL[static_cast<size_t>(bank.head)],r=bank.preR[static_cast<size_t>(bank.head)];
+            bank.preL[static_cast<size_t>(bank.head)]=inputL;bank.preR[static_cast<size_t>(bank.head)]=inputR;
+            bank.head=(bank.head+1)%static_cast<int>(bank.preL.size());
+            const auto feedback=feedbacks[k]*(.92f+space*.08f);
+            const auto feed=std::sqrt(1.f-feedback*feedback);
+            const auto mono=(l+r)*.075f;
+            float sumL=0.f,sumR=0.f;
+            for(size_t i=0;i<bank.left.size();++i)
+            {sumL+=bank.left[i].process((mono+l*.035f)*feed,feedback,damping[k]);sumR+=bank.right[i].process((mono+r*.035f)*feed,feedback,damping[k]);}
+            sumL*=.24f;sumR*=.24f;
+            for(auto& f:bank.diffuseL)sumL=f.process(sumL);
+            for(auto& f:bank.diffuseR)sumR=f.process(sumR);
+            const auto mid=(sumL+sumR)*.5f,side=(sumL-sumR)*.5f*width[k];
+            outputL+=(mid+side)*weights[k];outputR+=(mid-side)*weights[k];
         }
-        sumL *= 0.19f;
-        sumR *= 0.19f;
-        for (auto& filter : allPassL) sumL = filter.process (sumL);
-        for (auto& filter : allPassR) sumR = filter.process (sumR);
-
-        outputL = sumL * (1.0f - width * 0.3f) + sumR * width * 0.3f;
-        outputR = sumR * (1.0f - width * 0.3f) + sumL * width * 0.3f;
     }
-
 private:
-    std::array<CombFilter, 6> combL;
-    std::array<CombFilter, 6> combR;
-    std::array<AllPassFilter, 3> allPassL;
-    std::array<AllPassFilter, 3> allPassR;
+    std::array<Bank,4> banks;
+    std::array<float,4> weights{};
+    float space=0.f,smoothing=.001f;
+    bool initialized=false;
 };
 
 class PhraseLooper
@@ -1481,9 +1486,11 @@ struct Engine::Impl
             float reverbL = 0.0f;
             float reverbR = 0.0f;
             reverb.process (effectL, effectR, parameters.space, parameters.reverbStyle, reverbL, reverbR);
-            const auto dryEffect = 1.0f - parameters.space * 0.3f;
-            effectL = effectL * dryEffect + reverbL * parameters.space * 1.18f;
-            effectR = effectR * dryEffect + reverbR * parameters.space * 1.18f;
+            const auto spaceCurve = reverb.amount() * reverb.amount();
+            const auto dryEffect = 1.0f - spaceCurve * 0.85f;
+            const auto reverbGain = reverb.amount() * (1.18f + spaceCurve * 1.82f);
+            effectL = effectL * dryEffect + reverbL * reverbGain;
+            effectR = effectR * dryEffect + reverbR * reverbGain;
 
             feedbackL = saturate (effectL * 0.82f);
             feedbackR = saturate (effectR * 0.82f);
@@ -1506,8 +1513,8 @@ struct Engine::Impl
             auto mixedR = (inputR * dryGain + effectR * wetGain) * smoothedOutput;
             auto soloL = effectL * smoothedOutput, soloR = effectR * smoothedOutput;
             widen(mixedL, mixedR); widen(soloL, soloR);
-            auto roomL = reverbL * parameters.space * 1.18f * smoothedOutput;
-            auto roomR = reverbR * parameters.space * 1.18f * smoothedOutput;
+            auto roomL = reverbL * reverbGain * smoothedOutput;
+            auto roomR = reverbR * reverbGain * smoothedOutput;
             widen(roomL, roomR);
             reverbReturn[0][static_cast<std::size_t> (sample)] = roomL;
             reverbReturn[1][static_cast<std::size_t> (sample)] = roomR;

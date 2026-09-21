@@ -584,11 +584,11 @@ void FieldDisplay::renderLiquid()
 void FieldDisplay::mouseDown (const juce::MouseEvent& e)
 {
     if (! gesture || e.position.x > getWidth() * .72f || e.position.y < getHeight() * .22f) return;
-    dragging = true; grabDelta = {}; dragStart = e.position; gestureMode = e.mods.isAltDown() ? 2 : e.mods.isShiftDown() ? 1 : 0;
+    dragging = true; gesturePitchLocked = pitchLocked; grabDelta = {}; dragStart = e.position; gestureMode = e.mods.isAltDown() ? 2 : e.mods.isShiftDown() ? 1 : 0;
     startX = gestureMode == 1 ? frame.fieldStretch : gestureMode == 2 ? frame.fieldSplit : frame.fieldPosition;
     startY = frame.fieldPitch;
     gesture (gestureMode == 1 ? "fieldStretch" : gestureMode == 2 ? "fieldSplit" : "fieldPosition", startX, 0);
-    if (gestureMode == 0) gesture ("fieldPitch", startY, 0);
+    if (gestureMode == 0 && !gesturePitchLocked) gesture ("fieldPitch", startY, 0);
 }
 void FieldDisplay::mouseDrag (const juce::MouseEvent& e)
 {
@@ -596,20 +596,20 @@ void FieldDisplay::mouseDrag (const juce::MouseEvent& e)
     const auto delta = e.position - dragStart; grabDelta = delta;
     if (gestureMode == 1) gesture ("fieldStretch", juce::jlimit (.25f, 4.f, startX * std::pow (2.f, -delta.y / 60.f)), 1);
     else if (gestureMode == 2) gesture ("fieldSplit", juce::jlimit (0.f,1.f,startX + delta.x / 160.f),1);
-    else { gesture ("fieldPosition", juce::jlimit (0.f,1.f,startX + delta.x / (getWidth() * .6f)),1); gesture ("fieldPitch", juce::jlimit (-24.f,24.f,startY - delta.y / 4.f),1); }
+    else { gesture ("fieldPosition", juce::jlimit (0.f,1.f,startX + delta.x / (getWidth() * .6f)),1); if (!gesturePitchLocked) gesture ("fieldPitch", juce::jlimit (-24.f,24.f,startY - delta.y / 4.f),1); }
 }
 void FieldDisplay::mouseUp (const juce::MouseEvent&)
 {
     if (! dragging || ! gesture) return;
     dragging = false; gesture (gestureMode == 1 ? "fieldStretch" : gestureMode == 2 ? "fieldSplit" : "fieldPosition", 0.f, 2);
-    if (gestureMode == 0) gesture ("fieldPitch",0.f,2);
+    if (gestureMode == 0 && !gesturePitchLocked) gesture ("fieldPitch",0.f,2);
 }
 void FieldDisplay::mouseDoubleClick (const juce::MouseEvent& event)
 {
     if (! gesture) return;
     if (dragging) mouseUp (event);
     for (const auto* id : { "fieldPosition", "fieldPitch", "fieldStretch", "fieldSplit" })
-    { gesture (id,0.f,0); gesture (id,juce::String (id) == "fieldStretch" ? 1.f : 0.f,1); gesture (id,0.f,2); }
+    { if (pitchLocked && juce::String(id)=="fieldPitch") continue; gesture (id,0.f,0); gesture (id,juce::String (id) == "fieldStretch" ? 1.f : 0.f,1); gesture (id,0.f,2); }
 }
 
 void FieldDisplay::paint (juce::Graphics& g)
@@ -677,7 +677,7 @@ void FieldDisplay::paint (juce::Graphics& g)
     {
         const auto label = gestureMode == 1 ? "SHIFT + UP/DOWN   STRETCH  " + juce::String(frame.fieldStretch,2) + "x"
             : gestureMode == 2 ? "OPTION/ALT + LEFT/RIGHT   SPLIT  " + juce::String(juce::roundToInt(frame.fieldSplit*100.f)) + "%"
-            : "LEFT/RIGHT  SCAN " + juce::String(juce::roundToInt(frame.fieldPosition*100.f)) + "%   UP/DOWN  PITCH "
+            : "LEFT/RIGHT  SCAN " + juce::String(juce::roundToInt(frame.fieldPosition*100.f)) + (gesturePitchLocked ? "%   PITCH LOCKED " : "%   UP/DOWN  PITCH ")
                 + (frame.fieldPitch >= 0.f ? "+" : "") + juce::String(frame.fieldPitch,1) + " st";
         text (g, label, stage.withY(stage.getBottom()-23.f*s).withHeight(20.f*s),
               10.f*s, cyan, true, juce::Justification::centred);
@@ -887,6 +887,12 @@ MoteFieldAudioProcessorEditor::MoteFieldAudioProcessorEditor (MoteFieldAudioProc
     addAndMakeVisible (fieldDisplay);
     fieldDisplay.gesture = [this] (const char* id, float v, int stage)
     { if (auto* p = processor.parameters.getParameter (id)) { if (stage == 0) p->beginChangeGesture(); else if (stage == 2) p->endChangeGesture(); else p->setValueNotifyingHost (p->convertTo0to1 (v)); } };
+    setupButton(pitchLockButton, "PITCH LOCK", "Lock transpose while dragging the reactor. Scan still works left/right; pitch automation and the tuning controls remain available.", true);
+    pitchLockButton.setComponentID("reactor-pitch-lock");
+    pitchLockButton.onClick = [this] {
+        processor.parameters.state.setProperty("reactorPitchLock", pitchLockButton.getToggleState(), nullptr);
+        fieldDisplay.setPitchLocked(pitchLockButton.getToggleState());
+    };
     looperTape.setComponentID ("loop-waveform");
     addAndMakeVisible (looperTape);
     addKnob ("ACTIVITY", density, "Activity: changes how often fragments appear and overlap.");
@@ -895,7 +901,7 @@ MoteFieldAudioProcessorEditor::MoteFieldAudioProcessorEditor (MoteFieldAudioProc
     addKnob ("MIX", mix, "Mix: blends the original signal with the effect.");
     addKnob ("TIME", nullptr, "Time: subdivision with sync on; manual tempo with sync off.");
     addKnob ("REPEATS", repeats, "Repeats: extends fragments and feeds sound back into the effect.");
-    addKnob ("SPACE", space, "Space: adds the selected reverb.");
+    addKnob ("SPACE", space, "Space: blends from the direct effect into a pronounced reverb wash. Choose its character in Details.");
     addKnob ("LOOP LEVEL", looperLevel, "Loop Level: balances the recorded phrase against live playing.");
     addKnob ("DRIFT", modDepth, "Drift: pitch modulation depth.");
     addKnob ("DRIFT RATE", modRate, "Drift Rate: pitch modulation speed.");
@@ -1010,7 +1016,7 @@ MoteFieldAudioProcessorEditor::MoteFieldAudioProcessorEditor (MoteFieldAudioProc
     setupButton(randomPresetButton,"RANDOM","Create a new sound. Keeps your loop, transport, tempo and output level. Use SAVE to keep it.",false,0);
     randomPresetButton.setComponentID("random-preset");
     randomPresetButton.onClick=[this]{processor.randomizeSound(juce::Random::getSystemRandom().nextInt64());refreshDisplay();};
-    setupCombo (roomBox, { "Bright", "Dark", "Hall", "Infinite" }, "Reverb character.");
+    setupCombo (roomBox, { "Bright", "Dark", "Hall", "Infinite" }, "Bright: tight and crisp. Dark: muted and intimate. Hall: spacious, delayed bloom. Infinite: very long, diffuse decay. Use REVERB SOLO to compare.");
     setupCombo (speedBox, { "1/2x", "1x", "2x" }, "Phrase playback speed.");
     setupCombo (divisionBox, { "1/32", "1/16T", "1/16", "1/8T", "1/8", "1/4T", "1/4", "1/2", "1 bar" }, "Rhythmic subdivision. Also applies to the manual tempo.");
     comboAttachments.push_back (std::make_unique<ComboAttachment> (processor.parameters, reverbStyle, roomBox));
@@ -1281,6 +1287,9 @@ void MoteFieldAudioProcessorEditor::refreshDisplay()
     frame.reverse = value (reverse) > .5f;
     frame.bypass = value (bypass) > .5f;
     frame.width = value ("width");
+    const bool pitchLocked = static_cast<bool>(processor.parameters.state.getProperty("reactorPitchLock", false));
+    fieldDisplay.setPitchLocked(pitchLocked);
+    pitchLockButton.setToggleState(pitchLocked, juce::dontSendNotification);
     frame.fieldPitch = value ("fieldPitch"); frame.fieldPosition = value ("fieldPosition"); frame.fieldStretch = value ("fieldStretch"); frame.fieldSplit = value ("fieldSplit");
     if (tuningPanel) tuningPanel->refresh();
     matchStatus.setText (value ("reverbSolo") > .5f ? "REVERB SOLO / DETAILS" : value ("levelMatch") < .5f ? "OUTPUT MONITOR" : frame.matchLearning ? "LEVEL MATCH / LEARNING" : "LEVEL MATCH / " + juce::String (juce::Decibels::gainToDecibels(frame.matchGain), 1) + " dB", juce::dontSendNotification);
@@ -1356,6 +1365,7 @@ void MoteFieldAudioProcessorEditor::resized()
     {const auto angle=(-120.f+i*30.f)*pi/180.f;place(modeButtons[i],252+std::sin(angle)*116-27,369-std::cos(angle)*116-13,54,26);}
     for(int i=0;i<4;++i)place(variationButtons[i],126+i*65,502,60,44);
     place(fieldDisplay,431,221,1090,321);
+    place(pitchLockButton,1040,263,136,34);pitchLockButton.getProperties().set("darkControl",true);
     if (tuningPanel) { if (tuningPanel->isOpen()) place (*tuningPanel,1236,239,240,306); else place (*tuningPanel,1236,378,240,48); }
     place(matchStatus,1236,428,240,20); matchStatus.setFont(font(11*s));
     place(wetSoloButton,1236,450,114,40); place(levelMatchButton,1362,450,114,40);

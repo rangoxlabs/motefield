@@ -629,6 +629,20 @@ int main (int argc, char** argv)
                 require(processor.parameters.getRawParameterValue(id)->load()==held,"release reset parameter");
                 parameter->removeListener(&observer);
             }
+            reset();processor.setParameterValue("fieldPitch",7.f);editor->refreshDisplay();click(*editor,"reactor-pitch-lock");
+            const float lockedValue=processor.parameters.getRawParameterValue("fieldPitch")->load();
+            auto* pitch=processor.parameters.getParameter("fieldPitch");HostParameterObserver lockedPitch;pitch->addListener(&lockedPitch);
+            const auto origin=juce::Point<float>(field->getWidth()*.3f,field->getHeight()*.55f);
+            const auto lockedEvent=[&](juce::Point<float> position){return juce::MouseEvent(juce::Desktop::getInstance().getMainMouseSource(),position,juce::ModifierKeys(juce::ModifierKeys::leftButtonModifier),1.f,0.f,0.f,0.f,0.f,field,field,juce::Time::getCurrentTime(),origin,juce::Time::getCurrentTime(),1,true);};
+            field->mouseDown(lockedEvent(origin));field->mouseDrag(lockedEvent(origin+juce::Point<float>(80.f,-40.f)));settle();
+            saveImage(*editor,destination.getChildFile("pitch-locked.png"));field->mouseUp(lockedEvent(origin));
+            require(processor.parameters.getRawParameterValue("fieldPosition")->load()>0.f,"pitch lock blocked scan");
+            require(processor.parameters.getRawParameterValue("fieldPitch")->load()==lockedValue && lockedPitch.starts==0 && lockedPitch.values==0 && lockedPitch.ends==0,"locked drag wrote pitch automation");
+            processor.setParameterValue("fieldPitch",12.f);settle();require(std::abs(field->currentFrame().fieldPitch-12.f)<.001f,"pitch lock blocked external pitch automation");
+            pitch->removeListener(&lockedPitch);
+            juce::MemoryBlock lockedState;processor.getStateInformation(lockedState);MoteFieldAudioProcessor restored;restored.setStateInformation(lockedState.getData(),static_cast<int>(lockedState.getSize()));
+            require(static_cast<bool>(restored.parameters.state.getProperty("reactorPitchLock",false)),"pitch lock did not survive session recall");
+            click(*editor,"reactor-pitch-lock");
             reset();editor->setSize(1000,600);settle();saveImage(*editor,destination.getChildFile("reactor-small.png"));
             std::cout<<"Reactor silent automation, reduced motion, drags and release persistence passed.\n";
             return 0;
