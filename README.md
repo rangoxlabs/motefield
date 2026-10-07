@@ -2,13 +2,13 @@
 
 MoteField turns incoming audio into layered micro loops, granular textures, rhythmic glitches, and spatial repeats. It combines **11 effect modes**, A-D variations, **43 factory presets**, and a **60-second phrase looper** in a compact hardware-style interface.
 
-The clear enclosure, sculpted knob rails, and Acid lighting surround a pearl ferrofluid-inspired display. The floating fluid volume deforms, merges, and splits with processed sound and active voices; the adjacent Shape guide shows the grain envelope. Settings offers a custom accent color and dark mode, saved separately from sound presets.
+The clear enclosure, sculpted knob rails, and Acid lighting surround a translucent lime reactor display. The floating fluid volume deforms, merges, and splits with processed sound and active voices; the adjacent Shape guide shows the grain envelope. Settings offers a custom accent color and dark mode, saved separately from sound presets.
 
 ![MoteField interface](docs/images/motefield.png)
 
 **Knob underlights** brighten progressively with each amount knob’s position, using the chosen accent color in light or dark mode. The effect selector keeps a steady selection light.
 
-**Current version: 0.3.12 beta.** Universal AU/VST3 with pitch lock, distinct reverb styles, reactor feedback, preset folders, and 43 presets. Windows x64 VST3 0.3.12 ZIP and unsigned installer are also built and verified. See [VERIFICATION.md](VERIFICATION.md) for checks and remaining host-specific validation.
+**Current candidate: 0.3.13.** Universal macOS AU/VST3 has a signed, Apple-notarized DMG. AAX Native builds for Mac and Windows are available for development; Pro Tools host validation and Avid/PACE commercial signing remain pending. Windows signing setup is deferred. This candidate is not a public release. See [release preparation](RELEASE.md) and [verification](VERIFICATION.md) for completed checks and remaining work.
 
 ## Included effects
 
@@ -284,7 +284,7 @@ Original source is available under the [MIT License](LICENSE). JUCE and its bund
 
 Acid is the default accent on the neutral light enclosure. Open **Settings** to switch **Dark mode** on or off, choose a color with the picker/RGB sliders, or enter a six-digit hex color. **Reset to Acid** restores the accent without changing the light/dark setting.
 
-The accent follows knob light rings, selected controls, the recorded-loop playhead, and audio-reactive silver-fluid reflections. Labels use contrasting neutral colors. Appearance is saved on this computer separately from sound presets and DAW automation; open instances in the same plugin process update together. The recorded-loop waveform remains visible on its dedicated lower strip.
+The accent follows knob light rings, selected controls, the recorded-loop playhead, and audio-reactive reactor reflections. Labels use contrasting neutral colors. Appearance is saved on this computer separately from sound presets and DAW automation; open instances in the same plugin process update together. The recorded-loop waveform remains visible on its dedicated lower strip.
 
 ### 0.3.12: pitch lock and reverb contrast
 

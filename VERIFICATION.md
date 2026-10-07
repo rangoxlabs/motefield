@@ -1,3 +1,49 @@
+# 0.3.13 candidate verification — 2026-10-06
+
+Universal macOS AU/VST3/AAX/Standalone compilation passed. Local DSP and click suites passed (98.06 s / 9.50 s), as did the full native UI/state/preset and reactor gesture/notification suites: 43 presets, 71 stable host parameters, pitch lock/session recall, silent automation, reduced-motion response and balanced host gestures. AAX exports and arm64/x86_64 architectures were checked; AudioSuite and multi-mono are disabled.
+
+Developer ID signed, timestamped, hardened-runtime AU/VST3 0.3.13 were installed to the user Library after confirming DAWs were closed. Complete payload equality against the signed staging checkpoint passed. Previous 0.3.12 bundles were backed up. Installed AU validation passed on arm64 and x86_64 (the existing MIDI-on-aufx warning remains). These are automated validation results, not listening approval.
+
+The final AU/VST3 DMG was accepted by Apple with no issues, stapled, and accepted by Gatekeeper. It was mounted read-only and checked for both plug-in versions, universal architectures, strict Developer ID signatures, timestamps/runtime flags, installation instructions and dependency notices. Submission: `025ecf79-09a1-4aa0-a0cb-c286ca657dc3`. Final stapled DMG SHA256: `ff356c2ed7e2c2a4f697d06f3a57aaa0b2d99c61363cdc742b277fc2614db04b`. The notarization log records the pre-stapling hash; the final hash changes when the ticket is attached. Local evidence: `dist/release-evidence/0.3.13/`.
+
+[CI run 37563012810](https://github.com/rangoxlabs/motefield/actions/runs/37563012810) passed on macOS and Windows at `885f478`. Windows covers DSP/click suites, VST3 ZIP clean install/reinstall/backup/corruption rejection, and both standard and AAX installer/uninstaller checks. Downloaded SHA256 sidecars match; Windows ZIP CRC, full payload manifest, 0.3.13 version and x64 PE architecture pass. Mac CI ZIP CRC and PKG sidecar hashes pass. Local standard/AAX PKGs were also expanded and checked for format payloads, versions, architectures and notices. These CI installers are unsigned development packages.
+
+| Final CI artifact | SHA256 |
+| --- | --- |
+| Windows VST3 ZIP | `1f29f53569aa24c4443e3d43e36d60e297df1f6c6feb346ada4f368bf289f4b6` |
+| Windows standard EXE | `ee65b838fa38c04cd672a3adcd7dfce133552bb4126c2eec4ced5ccdde78e845` |
+| Windows AAX EXE | `f490d8f7b6199f5317c484ec9df78ab9a967f209cb0974e5fdf6069053be5f2b` |
+
+Still pending: Pro Tools Developer instantiation/audio/automation; final PACE-signed retail Pro Tools save/reopen; clean-machine downloaded installation; actual Mac/Windows DAW listening and automation playback; JUCE license confirmation. Signed PKG awaits an Installer identity; the notarized DMG is complete. Windows account/signing setup is deferred. Main and public releases remain unchanged.
+
+# Historical verification
+
+## Windows 0.3.12 complete — 2026-09-21
+
+GitHub Actions run [35660917470](https://github.com/rangoxlabs/motefield/actions/runs/35660917470) succeeded at commit 29f2508 on build/windows-0.3.12. Windows x64 compilation, DSP/click tests, direct ZIP clean install/reinstall/backup/corruption rejection, and EXE installer/uninstaller checks passed. Downloaded ZIP CRC, complete payload manifest, module version 0.3.12, x64 PE and published SHA256 sidecars verified locally. Mac/Windows build source parity verified.
+
+- ZIP: dist/friend-test/windows-0.3.12/MoteField-0.3.12-Windows-Test.zip (8,401,595 bytes), SHA256 32bd9b3fe7c9651d94572fdf31e6f71fcee85b3c334234ad4f52e175e5c0c978.
+- EXE: dist/installers/windows-0.3.12/MoteField-0.3.12-Windows-x64-UNSIGNED.exe (9,243,538 bytes), SHA256 9a79f4142591f9ce3cf73093e054bd4fd1c3596c74122557ec0f41b54d61f67f.
+
+Unsigned beta distribution; not a signing/notarization release. Windows DAW listening and actual Ableton automation playback still need user validation. Main branch remains untouched; build branches contain the tested source.
+
+
+## macOS 0.3.12 beta — 2026-09-21
+
+Includes PITCH LOCK beside the reactor, explicit drag directions, effect-mode preset folders plus Reactor Explorations, and more distinct Bright/Dark/Hall/Infinite reverbs with a stronger upper Space range. Existing preset values and IDs remain compatible, but reverb-enabled presets sound different. Pitch lock saves with the session, suppresses pitch writes from reactor drag/reset, and leaves explicit tuning/host automation active.
+
+Universal build and DSP/click suites passed (94.46s / 9.32s). Native full UI/preset checks and pitch-lock/gesture/session checks passed. Reverb checks cover style decorrelation and tails, Space contrast, finite levels and smoothed transitions (test peak step .00213839). Installed AU/VST3 version 0.3.12, both architectures, full staging/installed payload equality and strict ad-hoc signatures verified. Installed AU validation passed. Previous bundles backed up at ~/Library/Application Support/Rango Labs/MoteField/Backups/install-Jxk23qFp. Mac ZIP payload verification and CRC passed. Actual listening/DAW automation playback remains user validation; separate browser color controls are not integrated.
+
+
+## macOS 0.3.11 beta — 2026-09-21
+
+Installed universal AU and VST3 with 43 factory presets, parameter-driven reactor scan/pitch/stretch/split feedback, drag readouts, green dot-matrix bypass indicator, and lime jelly as the default reactor material over the original transparent enclosure. The six new presets are appended; existing program indices and parameter IDs are preserved. Separate reactor/casing color controls remain a browser prototype and are not in this build. Native Settings retains its previous accent controls.
+
+Release build and DSP/click tests passed (84.63 seconds combined). Final native UI/preset regression and reactor host-notification/visual tests passed. Installed bundle versions are 0.3.11, both arm64+x86_64, strict ad-hoc signatures valid, full file manifests identical to dist/macos. Installed AU validation passed, with the existing MIDI-on-aufx warning. DAWs were closed before replacement. Previous 0.3.10 bundles backed up at ~/Library/Application Support/Rango Labs/MoteField/Backups/install-tU5vBWID. User presets and exports preserved.
+
+Mac sharing ZIP: dist/friend-test/MoteField-0.3.11-Mac-Test.zip; manifest/signature/architecture verification and ZIP CRC passed. Windows remains 0.3.10; no new Windows build or public push. Actual Ableton automation recording/playback and listening approval remain unverified. No signing/notarization status changed.
+
+
 # 0.3.10 verification
 
 Playback region and crossfade implementation based on 0.3.9. Four parameters are appended with AU version hint 9 (71 total): Loop Start, Loop End, Loop Crossfade and Loop Region Snap. Legacy state and presets receive the full range, 20 ms crossfade and Snap off. A 5 ms protective minimum applies, limited to fit very short regions. The shared splice reader blends head/tail windows at complementary gains and retains the selected sample count; longer crossfades locally re-time more boundary audio. Stored recordings and undo layers are not rewritten. Export uses the same splice reader at original speed/direction and excludes playback gain. Parameter edits, speed changes and host seeks are smoothed; playback start/stop has a protective ramp.
