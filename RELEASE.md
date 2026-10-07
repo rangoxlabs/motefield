@@ -1,18 +1,22 @@
 # Release preparation
 
-## 0.3.13 release candidate — 2026-10-06
+## 0.3.13 release candidate — 2026-10-07
 
-Work is on `release/desktop-signing-aax-0313`; main and public releases are unchanged. This candidate includes the previously tested 0.3.12 pitch lock, reverb contrast, reactor feedback and 43 presets, plus AAX Native and distribution tooling. The separate browser appearance prototype is not included. Distribution is by direct download; no store submission is underway.
+The original AAX/DMG work was merged to main in PR #2. Automatic-installer follow-up is on `release/macos-installer-0313`; no public binary release has been published. This candidate includes the previously tested 0.3.12 pitch lock, reverb contrast, reactor feedback and 43 presets, plus AAX Native and distribution tooling. The separate browser appearance prototype is not included. Distribution is by direct download; no store submission is underway.
 
 | Track | Completed | Remaining |
 | --- | --- | --- |
-| macOS AU/VST3 | Universal build, Developer ID Application signing, hardened runtime, timestamps, Apple notarization, stapling and Gatekeeper assessment of the DMG. Installed AU validation passes on arm64 and x86_64. | Clean-machine downloaded installation and DAW listening/automation checks. Optional signed PKG needs a Developer ID Installer certificate. |
+| macOS AU/VST3 | Universal build, Developer ID Application signing, hardened runtime, timestamps, Apple notarization, stapling and Gatekeeper assessment of the automatic PKG and manual-copy DMG. Installed AU validation passes on arm64 and x86_64. | Clean-machine downloaded installation and DAW listening/automation checks. Company signing identity requires organization membership if desired for launch. |
 | AAX Native | Universal macOS and Windows x64 builds; development installers use standard Avid folders. Windows installer/uninstaller checks pass. Commercial/PACE onboarding request sent to Avid. | Avid commercial agreement and publisher/PACE access; Pro Tools Developer host tests; final PACE-signed retail Pro Tools tests, including save/reopen. |
-| Windows signing | Unsigned VST3/AAX build and installer checks pass. Signing scripts support a certificate store or Artifact Signing. | Account setup and signing are deferred at the user's request. |
+| Windows signing | Unsigned VST3/AAX build and installer checks pass. Signing scripts support a certificate store or Artifact Signing. | Account setup resumed; Azure enrollment, organization validation and signing remain pending. |
 
-The notarized AU/VST3 candidate is `dist/installers/MoteField-0.3.13-macOS-universal.dmg`, SHA256 `ff356c2ed7e2c2a4f697d06f3a57aaa0b2d99c61363cdc742b277fc2614db04b`. Apple accepted submission `025ecf79-09a1-4aa0-a0cb-c286ca657dc3` with no issues. The final stapled artifact, both plug-in signatures/architectures/versions, instructions and notices were checked after mounting it read-only. It is not published. The signature uses the existing individual Apple team and therefore displays the account holder's legal name, not the Rango Labs brand.
+The preferred automatic installer candidate is `dist/installers/MoteField-0.3.13-macOS-universal.pkg`, SHA256 `ff2eeb62e0d4d924cdf4db4f0bcd2e2bf9cee372276a6e2eff22c99f2f984f25` (33,733,443 bytes). Apple accepted submission `937995d2-5322-481b-b503-a989753a73c0` with no issues. The final PKG is signed, notarized, stapled and accepted by Gatekeeper. Expanded payload checks confirm universal signed AU/VST3 0.3.13, automatic system destinations, dependency notices and both installer pages. Native Installer shows a valid certificate. The actual local installation succeeded: the receipt reports 0.3.13, all 23 payload files match, signatures verify, and the system AU passes arm64 and Rosetta x86_64 validation. Clean-machine downloaded installation and DAW listening/automation checks remain pending.
 
-[CI run 37563012810](https://github.com/rangoxlabs/motefield/actions/runs/37563012810) passed macOS and Windows at `885f478`. Its installers are development artifacts, not the separately notarized DMG. See [VERIFICATION.md](VERIFICATION.md) for evidence and outstanding host checks.
+The earlier manual-copy DMG remains at `dist/installers/MoteField-0.3.13-macOS-universal.dmg`, SHA256 `ff356c2ed7e2c2a4f697d06f3a57aaa0b2d99c61363cdc742b277fc2614db04b`. Its Apple submission is `025ecf79-09a1-4aa0-a0cb-c286ca657dc3`. Both artifacts are private candidates, not published.
+
+The installer and plug-in display Rango Labs branding. The existing individual Apple team's certificates identify the account holder as the verified signer. Company-name signing requires an organization membership and corresponding company certificates; changing the installer title does not change that identity. Apple allows founders/cofounders to request conversion and requires the organization's D-U-N-S details, with possible business-document verification. [Apple membership conversion](https://developer.apple.com/help/account/membership/updating-your-account-information/). The account holder is handling the organization conversion inquiry with Apple; approval is not yet confirmed.
+
+[CI run 37563012810](https://github.com/rangoxlabs/motefield/actions/runs/37563012810) passed macOS and Windows at `885f478`. Its installers are development artifacts, not the separately notarized PKG/DMG. See [VERIFICATION.md](VERIFICATION.md) for evidence and outstanding host checks.
 
 ## AAX onboarding and validation
 
