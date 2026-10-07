@@ -578,8 +578,8 @@ void testOutputMonitoring()
         double energy=0.;
         for(int i=0;i<block;++i)
         {
-            const auto expectedL=std::get<2>(full)[i]-.82f*std::get<2>(pre)[i];
-            const auto expectedR=std::get<3>(full)[i]-.82f*std::get<3>(pre)[i];
+            const auto expectedL=std::get<2>(full)[i]-(1.f-.85f*.6f*.6f)*std::get<2>(pre)[i];
+            const auto expectedR=std::get<3>(full)[i]-(1.f-.85f*.6f*.6f)*std::get<3>(pre)[i];
             require(std::abs(std::get<2>(isolated)[i]-expectedL)<.00005f && std::abs(std::get<3>(isolated)[i]-expectedR)<.00005f,"Reverb Solo contains dry signal or differs from return");
             require(std::abs(std::get<2>(isolated)[i]-std::get<2>(both)[i])<.00005f,"Wet Solo leaks into Reverb Solo");
             energy+=expectedL*expectedL+expectedR*expectedR;
@@ -824,10 +824,48 @@ void testConcurrentLoopRestore()
     std::cout<<"Concurrent loop restore passed: newest archive survives publication, snapshots and allocation-free audio handoff.\n";
 }
 
+void testReverbIdentity()
+{
+    constexpr int sr=48000,block=256,total=sr*8;
+    const auto render=[=](int style,float space)
+    {
+        motefield::Engine engine;engine.prepare(sr,block,2);
+        motefield::EngineParameters p;p.looperOnly=true;p.reverbSolo=true;p.space=space;p.reverbStyle=style;p.mix=1.f;
+        std::array<float,block> in{},l{},r{};std::vector<float> result;result.reserve(total);
+        unsigned seed=12345;
+        for(int offset=-((sr+block-1)/block)*block;offset<total;offset+=block)
+        {
+            const auto count=std::min(block,total-offset);
+            for(int i=0;i<count;++i){seed=seed*1664525u+1013904223u;in[i]=offset+i>=0 && offset+i<4800?(float(seed>>8)/16777216.f-.5f)*.2f:0.f;}
+            const float* inputs[]{in.data(),in.data()};float* outputs[]{l.data(),r.data()};engine.process(inputs,outputs,2,count,p);
+            for(int i=0;i<count;++i){require(std::isfinite(l[i])&&std::abs(l[i])<1.f,"reverb produced invalid level");if(offset>=0)result.push_back(l[i]);}
+        }
+        return result;
+    };
+    std::array<std::vector<float>,4> styles;
+    const auto energy=[](const auto& data,int start){double e=0.;for(size_t i=static_cast<size_t>(start);i<data.size();++i)e+=double(data[i])*data[i];return e;};
+    for(int k=0;k<4;++k){styles[k]=render(k,1.f);std::cout<<"Reverb style "<<k<<" total="<<energy(styles[k],0)<<" late="<<energy(styles[k],sr*2)<<"\n";}
+    require(energy(styles[2],sr*2)>energy(styles[0],sr*2)*10.,"Hall tail is not distinct from Bright");
+    require(energy(styles[3],sr*4)>energy(styles[2],sr*4)*4.,"Infinite tail is not distinct from Hall");
+    for(int a=0;a<4;++a)for(int b=a+1;b<4;++b)
+    {double dot=0.;for(int i=0;i<total;++i)dot+=double(styles[a][i])*styles[b][i];require(std::abs(dot)/std::sqrt(energy(styles[a],0)*energy(styles[b],0))<.9,"reverb styles are too correlated");}
+    const auto subtle=render(2,.25f);require(energy(styles[2],0)>energy(subtle,0)*8.,"Space maximum lacks contrast");
+    motefield::Engine engine;engine.prepare(sr,block,2);motefield::EngineParameters p;p.looperOnly=true;p.mix=1.f;p.space=.2f;
+    std::array<float,block> in{},l{},r{};float previous=0.f,jump=0.f;
+    for(int offset=0;offset<sr*3;offset+=block)
+    {p.reverbStyle=(offset/(sr/4))%4;p.space=((offset/(sr/4))%2)?1.f:0.f;for(int i=0;i<block;++i)in[i]=.1f*std::sin(twoPi*(offset+i)*110.f/sr);
+     const float* inputs[]{in.data(),in.data()};float* outputs[]{l.data(),r.data()};engine.process(inputs,outputs,2,block,p);
+     for(float sample:l){jump=std::max(jump,std::abs(sample-previous));previous=sample;}}
+    require(jump<.04f,"Space/style changes caused abrupt output steps");
+    std::cout<<"Reverb identity, Space contrast and transition checks passed; max step="<<jump<<"\n";
+}
+
 } // namespace
 
 int main (int argc, char** argv)
 {
+    testReverbIdentity();
+    if(argc>1 && std::string(argv[1])=="--reverb-only")return 0;
     testLoopRegions();
     if(argc>1 && std::string(argv[1])=="--regions-only")return 0;
     testFeedbackDecay();

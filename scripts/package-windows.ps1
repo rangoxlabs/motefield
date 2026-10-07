@@ -2,6 +2,11 @@ param(
     [string]$BuildDir = "",
     [switch]$Unsigned,
     [string]$CertificateThumbprint = $env:WINDOWS_CERTIFICATE_THUMBPRINT,
+    [string]$ArtifactSigningDlib = "",
+    [string]$ArtifactSigningMetadata = "",
+    [switch]$AAX,
+    [string]$SignedAaxPath = "",
+    [string]$PaceWrapTool = "wraptool.exe",
     [string]$TimestampUrl = "http://timestamp.digicert.com",
     [string]$ISCC = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
 )
@@ -21,18 +26,51 @@ try {
     Copy-Item -Recurse $bundle "$stage/MoteField.vst3"
     $suffix = "-UNSIGNED"
     $signOptions = @()
+    $aaxOptions = @()
+    if ($AAX) {
+        $aaxSource = if ($SignedAaxPath) { $SignedAaxPath } else { Join-Path $BuildDir 'MoteField_artefacts/Release/AAX/MoteField.aaxplugin' }
+        $aaxBinary = Join-Path $aaxSource 'Contents/x64/MoteField.aaxplugin'
+        if (-not (Test-Path $aaxBinary)) { throw 'Missing Windows AAX Native bundle' }
+        $aaxVersion = (Get-Item $aaxBinary).VersionInfo.ProductVersion
+        if ($aaxVersion -ne $version) { throw "AAX version $aaxVersion differs from VST3 version $version" }
+        Copy-Item -Recurse $aaxSource "$stage/MoteField.aaxplugin"
+        $aaxOptions = @("/DAaxSource=$stage/MoteField.aaxplugin")
+        if (-not $Unsigned) {
+            if (-not $SignedAaxPath) { throw 'Release AAX requires -SignedAaxPath from the PACE signing pipeline' }
+            & $PaceWrapTool verify --in "$stage/MoteField.aaxplugin"
+            if ($LASTEXITCODE -ne 0) { throw 'PACE signature verification failed' }
+        }
+    }
     if (-not $Unsigned) {
-        if ($CertificateThumbprint -notmatch '^[0-9A-Fa-f]{40}$') { throw "Pass a Windows code-signing certificate SHA-1 thumbprint, or explicitly use -Unsigned for testing" }
         $signTool = (Get-Command signtool.exe -ErrorAction Stop).Source
-        & $signTool sign /sha1 $CertificateThumbprint /fd SHA256 /tr $TimestampUrl /td SHA256 "$stage/MoteField.vst3/Contents/x86_64-win/MoteField.vst3"
+        if ($ArtifactSigningDlib -or $ArtifactSigningMetadata) {
+            if ($CertificateThumbprint) { throw 'Select either certificate-store or Artifact Signing, not both' }
+            $dlib = (Resolve-Path -LiteralPath $ArtifactSigningDlib -ErrorAction Stop).Path
+            $metadataPath = (Resolve-Path -LiteralPath $ArtifactSigningMetadata -ErrorAction Stop).Path
+            $signingMetadata = Get-Content -LiteralPath $metadataPath -Raw | ConvertFrom-Json
+            if (-not $signingMetadata.Endpoint -or -not $signingMetadata.CodeSigningAccountName -or -not $signingMetadata.CertificateProfileName) { throw 'Incomplete Artifact Signing metadata' }
+            if (-not $PSBoundParameters.ContainsKey('TimestampUrl')) { $TimestampUrl = 'http://timestamp.acs.microsoft.com' }
+            $providerArgs = @('/dlib', $dlib, '/dmdf', $metadataPath)
+            $providerCommand = "/dlib `$q$dlib`$q /dmdf `$q$metadataPath`$q"
+        } else {
+            if ($CertificateThumbprint -notmatch '^[0-9A-Fa-f]{40}$') { throw 'Configure a certificate thumbprint or Artifact Signing, or explicitly use -Unsigned' }
+            $providerArgs = @('/sha1', $CertificateThumbprint)
+            $providerCommand = "/sha1 $CertificateThumbprint"
+        }
+        & $signTool sign @providerArgs /fd SHA256 /tr $TimestampUrl /td SHA256 "$stage/MoteField.vst3/Contents/x86_64-win/MoteField.vst3"
         if ($LASTEXITCODE -ne 0) { throw "Plugin signing failed" }
         & $signTool verify /pa /all "$stage/MoteField.vst3/Contents/x86_64-win/MoteField.vst3"
         if ($LASTEXITCODE -ne 0) { throw "Plugin signature verification failed" }
         $suffix = ""
-        $signCommand = "`$q$signTool`$q sign /sha1 $CertificateThumbprint /fd SHA256 /tr $TimestampUrl /td SHA256 `$f"
+        if ($AAX) {
+            & $signTool verify /pa /all "$stage/MoteField.aaxplugin/Contents/x64/MoteField.aaxplugin"
+            if ($LASTEXITCODE -ne 0) { throw 'AAX Authenticode verification failed' }
+        }
+        $signCommand = "`$q$signTool`$q sign $providerCommand /fd SHA256 /tr `$q$TimestampUrl`$q /td SHA256 `$f"
         $signOptions = @('/DSignedBuild=1', "/SRangoSign=$signCommand")
     }
-    & $ISCC "/DPluginSource=$stage/MoteField.vst3" "/DAppVersion=$version" "/DOutputDir=$outputDir" "/DFileSuffix=$suffix" @signOptions "$projectDir/packaging/windows/MoteField.iss"
+    if ($AAX) { $suffix = "-AAX$suffix" }
+    & $ISCC "/DPluginSource=$stage/MoteField.vst3" "/DAppVersion=$version" "/DOutputDir=$outputDir" "/DFileSuffix=$suffix" @signOptions @aaxOptions "$projectDir/packaging/windows/MoteField.iss"
     if ($LASTEXITCODE -ne 0) { throw "Installer compilation failed" }
     $installer = Join-Path $outputDir "MoteField-$version-Windows-x64$suffix.exe"
     if (-not $Unsigned) {
