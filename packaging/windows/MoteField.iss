@@ -25,6 +25,7 @@ SignedUninstaller=yes
 #endif
 
 [Files]
+Source: "{#NoticesSource}\*"; DestDir: "{app}\Notices"; Flags: ignoreversion
 Source: "{#PluginSource}\*"; DestDir: "{commoncf64}\VST3\MoteField.vst3"; Flags: ignoreversion recursesubdirs createallsubdirs
 #ifdef AaxSource
 Source: "{#AaxSource}\*"; DestDir: "{commoncf64}\Avid\Audio\Plug-Ins\MoteField.aaxplugin"; Flags: ignoreversion recursesubdirs createallsubdirs

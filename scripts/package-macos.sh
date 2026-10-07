@@ -64,6 +64,9 @@ if [[ "$include_aax" == --include-aax ]]; then
 fi
 
 # Disable bundle relocation so a previous per-user copy cannot redirect installation.
+python3 "${project_dir}/scripts/collect-notices.py" \
+  --juce-dir "${project_dir}/build-macos/_deps/juce-src" \
+  --output "${payload}/Library/Application Support/Rango Labs/MoteField/Notices"
 pkgbuild --analyze --root "$payload" "${work_dir}/components.plist"
 python3 - "${work_dir}/components.plist" <<'PY'
 import plistlib, sys

@@ -203,6 +203,16 @@ The display is a visual interpretation of the sound. Rendering runs on the UI th
 
 The project uses C++20, CMake 3.22+, Git, and a pinned JUCE dependency fetched during configuration. Mono-to-mono and stereo-to-stereo processing are supported.
 
+### AAX Native development
+
+Version 0.3.13 adds an optional AAX Native target. Enable it with `MOTEFIELD_BUILD_AAX=ON bash scripts/build-macos.sh` on macOS or `./scripts/build-windows.ps1 -AAX` on Windows. CMake users can pass `-DMOTEFIELD_BUILD_AAX=ON`. JUCE's bundled AAX SDK is used by default; `MOTEFIELD_AAX_SDK_PATH` can select an external SDK.
+
+Unsigned AAX builds require Pro Tools Developer. Retail Pro Tools requires PACE signing; a successful build does not establish host compatibility or commercial distribution approval. This target supports native mono/stereo effects; AudioSuite and multi-mono are disabled pending dedicated validation. Existing AU/VST3 parameter identifiers and session state are unchanged.
+
+Development installers can include AAX using `bash scripts/package-macos.sh --unsigned --include-aax` or `./scripts/package-windows.ps1 -Unsigned -AAX`. They install AAX to Avid's standard system plug-in folder. Keep these unsigned installers separate from public releases.
+
+Windows signed packaging supports either a certificate thumbprint or Microsoft Artifact Signing through `-ArtifactSigningDlib` and `-ArtifactSigningMetadata`. Use an approved Public Trust profile and authenticated signing runner. The example in `packaging/windows/artifact-signing.metadata.example.json` is a template, not an active account. Signed AAX packaging additionally requires the final PACE-signed bundle; installers verify it without modifying its contents.
+
 ### macOS
 
 Install full Xcode and select it as the active developer directory, then run:

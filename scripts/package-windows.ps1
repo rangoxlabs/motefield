@@ -24,6 +24,8 @@ $stage = Join-Path $projectDir "dist/windows-stage/$([guid]::NewGuid())"
 New-Item -ItemType Directory -Force $stage, $outputDir | Out-Null
 try {
     Copy-Item -Recurse $bundle "$stage/MoteField.vst3"
+    & python "$projectDir/scripts/collect-notices.py" --juce-dir "$BuildDir/_deps/juce-src" --output "$stage/Notices"
+    if ($LASTEXITCODE -ne 0) { throw 'Collecting third-party notices failed' }
     $suffix = "-UNSIGNED"
     $signOptions = @()
     $aaxOptions = @()
@@ -70,7 +72,7 @@ try {
         $signOptions = @('/DSignedBuild=1', "/SRangoSign=$signCommand")
     }
     if ($AAX) { $suffix = "-AAX$suffix" }
-    & $ISCC "/DPluginSource=$stage/MoteField.vst3" "/DAppVersion=$version" "/DOutputDir=$outputDir" "/DFileSuffix=$suffix" @signOptions @aaxOptions "$projectDir/packaging/windows/MoteField.iss"
+    & $ISCC "/DPluginSource=$stage/MoteField.vst3" "/DNoticesSource=$stage/Notices" "/DAppVersion=$version" "/DOutputDir=$outputDir" "/DFileSuffix=$suffix" @signOptions @aaxOptions "$projectDir/packaging/windows/MoteField.iss"
     if ($LASTEXITCODE -ne 0) { throw "Installer compilation failed" }
     $installer = Join-Path $outputDir "MoteField-$version-Windows-x64$suffix.exe"
     if (-not $Unsigned) {
