@@ -8,7 +8,7 @@ The clear enclosure, sculpted knob rails, and Acid lighting surround a transluce
 
 **Knob underlights** brighten progressively with each amount knob’s position, using the chosen accent color in light or dark mode. The effect selector keeps a steady selection light.
 
-**Current candidate: 0.3.13.** Universal macOS AU/VST3 has a signed, Apple-notarized DMG. AAX Native builds for Mac and Windows are available for development; Pro Tools host validation and Avid/PACE commercial signing remain pending. Windows signing setup is deferred. This candidate is not a public release. See [release preparation](RELEASE.md) and [verification](VERIFICATION.md) for completed checks and remaining work.
+**Current candidate: 0.3.13.** Universal macOS AU/VST3 has a signed, Apple-notarized automatic PKG installer and a manual-copy DMG. AAX Native builds for Mac and Windows are available for development; Pro Tools host validation and Avid/PACE commercial signing remain pending. Windows signing setup is deferred. This candidate is not a public release. See [release preparation](RELEASE.md) and [verification](VERIFICATION.md) for completed checks and remaining work.
 
 ## Included effects
 
