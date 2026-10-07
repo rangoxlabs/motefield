@@ -49,7 +49,8 @@ public:
     void mouseDrag (const juce::MouseEvent&) override;
     void mouseUp (const juce::MouseEvent&) override;
     void mouseDoubleClick (const juce::MouseEvent&) override;
-    juce::String getTooltip() override { return "Drag liquid to scan / transpose. Shift-drag stretches. Alt-drag splits voices. Double-click resets."; }
+    juce::String getTooltip() override { return "Drag LEFT / RIGHT to scan the audio.\nDrag UP / DOWN to raise / lower pitch (unless PITCH LOCK is on).\nSHIFT + drag UP / DOWN to stretch / shorten.\nOPTION (Mac) / ALT (Windows) + drag RIGHT / LEFT to split / merge voices.\nDouble-click resets the reactor controls; PITCH LOCK protects pitch."; }
+    void setPitchLocked (bool locked) { pitchLocked = locked; }
     void setEnvelopeVisible (bool show) { envelopeVisible = show; repaint(); }
     void invalidateMaterial() { materialRendered = false; }
     void setShape (float value) { shape = value; }
@@ -57,8 +58,9 @@ public:
     void setReducedMotion (bool enabled) { reducedMotion = enabled; repaint(); }
     const motefield::VisualFrame& currentFrame() const { return frame; }
 private:
-    juce::Point<float> dragStart;
-    float startX = 0.f, startY = 0.f; int gestureMode = 0; bool dragging = false;
+    juce::Point<float> dragStart, grabDelta;
+    float visualStretch = 1.f, visualSplit = 0.f, grabAmount = 0.f;
+    float startX = 0.f, startY = 0.f; int gestureMode = 0; bool dragging = false, pitchLocked = false, gesturePitchLocked = false;
     struct LiquidVoice
     {
         std::uint64_t id = 0;
@@ -167,7 +169,7 @@ private:
     std::vector<std::unique_ptr<ParameterKnob>> knobs;
     std::vector<std::unique_ptr<SliderAttachment>> sliderAttachments;
     std::unique_ptr<SliderAttachment> timeAttachment;
-    juce::TextButton reverseButton, syncButton, tapButton, holdButton, bypassButton, wetSoloButton, levelMatchButton, reverbSoloButton;
+    juce::TextButton reverseButton, syncButton, tapButton, holdButton, bypassButton, wetSoloButton, levelMatchButton, reverbSoloButton, pitchLockButton;
     juce::Label matchStatus;
     std::unique_ptr<TuningPanel> tuningPanel;
     juce::TextButton recordButton, playButton, dubButton, stopButton, undoButton, eraseButton;

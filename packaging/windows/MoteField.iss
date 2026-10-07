@@ -16,7 +16,7 @@ OutputBaseFilename=MoteField-{#AppVersion}-Windows-x64{#FileSuffix}
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
-UninstallDisplayName=MoteField VST3 — Rango Labs
+UninstallDisplayName=MoteField — Rango Labs
 CloseApplications=yes
 RestartApplications=no
 #ifdef SignedBuild
@@ -25,7 +25,11 @@ SignedUninstaller=yes
 #endif
 
 [Files]
+Source: "{#NoticesSource}\*"; DestDir: "{app}\Notices"; Flags: ignoreversion
 Source: "{#PluginSource}\*"; DestDir: "{commoncf64}\VST3\MoteField.vst3"; Flags: ignoreversion recursesubdirs createallsubdirs
+#ifdef AaxSource
+Source: "{#AaxSource}\*"; DestDir: "{commoncf64}\Avid\Audio\Plug-Ins\MoteField.aaxplugin"; Flags: ignoreversion recursesubdirs createallsubdirs
+#endif
 
 [Messages]
-WelcomeLabel2=This installs MoteField by Rango Labs for 64-bit VST3 hosts.%n%nQuit your DAW before continuing. After installation, reopen your DAW and rescan plugins.%n%nRecorded phrase audio saves with your project and user presets.
+WelcomeLabel2=This installs MoteField by Rango Labs.%n%nQuit your DAW before continuing. After installation, reopen your DAW and rescan plugins.%n%nRecorded phrase audio saves with your project and user presets.

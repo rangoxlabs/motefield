@@ -1,14 +1,14 @@
 # MoteField by Rango Labs
 
-MoteField turns incoming audio into layered micro loops, granular textures, rhythmic glitches, and spatial repeats. It combines **11 effect modes**, A-D variations, **37 factory presets**, and a **60-second phrase looper** in a compact hardware-style interface.
+MoteField turns incoming audio into layered micro loops, granular textures, rhythmic glitches, and spatial repeats. It combines **11 effect modes**, A-D variations, **43 factory presets**, and a **60-second phrase looper** in a compact hardware-style interface.
 
-The clear enclosure, sculpted knob rails, and Acid lighting surround a pearl ferrofluid-inspired display. The floating fluid volume deforms, merges, and splits with processed sound and active voices; the adjacent Shape guide shows the grain envelope. Settings offers a custom accent color and dark mode, saved separately from sound presets.
+The clear enclosure, sculpted knob rails, and Acid lighting surround a translucent lime reactor display. The floating fluid volume deforms, merges, and splits with processed sound and active voices; the adjacent Shape guide shows the grain envelope. Settings offers a custom accent color and dark mode, saved separately from sound presets.
 
 ![MoteField interface](docs/images/motefield.png)
 
 **Knob underlights** brighten progressively with each amount knob’s position, using the chosen accent color in light or dark mode. The effect selector keeps a steady selection light.
 
-**Current version: 0.3.10 beta.** Universal macOS AU/VST3 and Windows x64 VST3. See [VERIFICATION.md](VERIFICATION.md) for checks and remaining host-specific validation.
+**Current candidate: 0.3.13.** Universal macOS AU/VST3 has a signed, Apple-notarized DMG. AAX Native builds for Mac and Windows are available for development; Pro Tools host validation and Avid/PACE commercial signing remain pending. Windows signing setup is deferred. This candidate is not a public release. See [release preparation](RELEASE.md) and [verification](VERIFICATION.md) for completed checks and remaining work.
 
 ## Included effects
 
@@ -115,7 +115,20 @@ These are global offsets added to each mode's own pitch behavior. User presets a
 
 ## Presets and automation
 
-The preset menu has **Factory** and **User** submenus. Choose from 37 factory starting points covering all eleven modes, or use **Save** to name the current sound. Replacing an existing user preset requires confirmation. An asterisk marks changes from the selected preset, and its name is retained with the DAW session.
+The 0.3.11 bank adds six reactor starting points:
+
+| Preset | Starting character | Try |
+| --- | --- | --- |
+| Slow Taffy | Veil with 2.4× stretch | Shift-drag to change grain duration |
+| Twin Bloom | Bloom with 70% split | Option-drag to merge or separate voices |
+| Deep Scan | Chain with an offset scan position | Drag horizontally through the captured buffer |
+| Glass Lift | Pluck at +7 semitones with shorter grains | Drag vertically to transpose |
+| Elastic Orbit | Orbit with stretch and moderate split | Explore stretch, then voice separation |
+| Low Gravity | Smear one octave down at 1.6× stretch | Shift-drag to change repeat timing |
+
+Reactor gestures write ordinary plug-in parameters: normal dragging controls Scan and Pitch, Shift-drag controls Stretch, and Option/Alt-drag controls Split. In Ableton Arrangement View, enable **Automation Arm** and **Arrangement Record** to record those movements. In Session View, enable Automation Arm, arm the track, and use Session Record (or configure Session automation recording for all playing clips). See [Live's automation recording instructions](https://www.ableton.com/en/live-manual/12/automation-and-editing-envelopes/). Presets store the starting values; the DAW stores the recorded movements.
+
+The preset menu has **Factory** and **User** submenus. Factory presets are grouped into effect-mode folders with short descriptions, plus **Reactor Explorations** for the six gesture-focused sounds. Choose from 43 factory starting points covering all eleven modes, or use **Save** to name the current sound. Replacing an existing user preset requires confirmation. An asterisk marks changes from the selected preset, and its name is retained with the DAW session.
 
 **Initialize sound** in the preset menu keeps the selected effect mode and loads a simple variation-A starting sound with modest Activity and Repeats, Mix at 40%, Feedback at 50%, Width at 100%, and no added Space or Drift. Material, pitch, pattern and sidechain sound controls return to defaults. Timing/subdivision, output level, monitoring, Hold/Bypass, all looper settings, recorded audio, MIDI mappings and appearance are retained. The preset name becomes **Init - Orbit** (or the current mode). **Undo initialization** restores the previous sound and preset identity; loading, saving or randomizing a sound, or restoring a session, clears this one-step undo. Use **SAVE** to keep your initialized sound. POST recordings keep their captured sound; PRE recordings continue through the live effects.
 
@@ -176,7 +189,7 @@ The surface remains a ferrofluid-inspired interpretation with damped motion, not
 
 Choose **Source note**, **Scale root**, and a major, minor, or pentatonic scale to constrain grain transpositions. Source note is set manually; this does not detect and retune every note in polyphonic audio. Sweeps can travel between the constrained endpoints. Grid's delay taps do not use the grain scale controls.
 
-Select a parameter and click **Learn next MIDI CC**, then move a controller. Mappings save with the DAW project. Defaults: CC1 controls Drift depth, CC11 controls Mix, and CC64 controls Hold. Transport CCs act on a rising press and ignore release, while the Burst gate records until released. MIDI CC events are applied at their sample offsets. Program changes 1–37 select factory presets through the message-thread preset loader, so preset changes are not sample-accurate. Host automation remains available independently of MIDI routing.
+Select a parameter and click **Learn next MIDI CC**, then move a controller. Mappings save with the DAW project. Defaults: CC1 controls Drift depth, CC11 controls Mix, and CC64 controls Hold. Transport CCs act on a rising press and ignore release, while the Burst gate records until released. MIDI CC events are applied at their sample offsets. Program changes 1–43 select factory presets through the message-thread preset loader, so preset changes are not sample-accurate. Host automation remains available independently of MIDI routing.
 
 ## Audio-reactive display
 
@@ -189,6 +202,16 @@ The display is a visual interpretation of the sound. Rendering runs on the UI th
 ## Build and install
 
 The project uses C++20, CMake 3.22+, Git, and a pinned JUCE dependency fetched during configuration. Mono-to-mono and stereo-to-stereo processing are supported.
+
+### AAX Native development
+
+Version 0.3.13 adds an optional AAX Native target. Enable it with `MOTEFIELD_BUILD_AAX=ON bash scripts/build-macos.sh` on macOS or `./scripts/build-windows.ps1 -AAX` on Windows. CMake users can pass `-DMOTEFIELD_BUILD_AAX=ON`. JUCE's bundled AAX SDK is used by default; `MOTEFIELD_AAX_SDK_PATH` can select an external SDK.
+
+Unsigned AAX builds require Pro Tools Developer. Retail Pro Tools requires PACE signing; a successful build does not establish host compatibility or commercial distribution approval. This target supports native mono/stereo effects; AudioSuite and multi-mono are disabled pending dedicated validation. Existing AU/VST3 parameter identifiers and session state are unchanged.
+
+Development installers can include AAX using `bash scripts/package-macos.sh --unsigned --include-aax` or `./scripts/package-windows.ps1 -Unsigned -AAX`. They install AAX to Avid's standard system plug-in folder. Keep these unsigned installers separate from public releases.
+
+Windows signed packaging supports either a certificate thumbprint or Microsoft Artifact Signing through `-ArtifactSigningDlib` and `-ArtifactSigningMetadata`. Use an approved Public Trust profile and authenticated signing runner. The example in `packaging/windows/artifact-signing.metadata.example.json` is a template, not an active account. Signed AAX packaging additionally requires the final PACE-signed bundle; installers verify it without modifying its contents.
 
 ### macOS
 
@@ -261,4 +284,10 @@ Original source is available under the [MIT License](LICENSE). JUCE and its bund
 
 Acid is the default accent on the neutral light enclosure. Open **Settings** to switch **Dark mode** on or off, choose a color with the picker/RGB sliders, or enter a six-digit hex color. **Reset to Acid** restores the accent without changing the light/dark setting.
 
-The accent follows knob light rings, selected controls, the recorded-loop playhead, and audio-reactive silver-fluid reflections. Labels use contrasting neutral colors. Appearance is saved on this computer separately from sound presets and DAW automation; open instances in the same plugin process update together. The recorded-loop waveform remains visible on its dedicated lower strip.
+The accent follows knob light rings, selected controls, the recorded-loop playhead, and audio-reactive reactor reflections. Labels use contrasting neutral colors. Appearance is saved on this computer separately from sound presets and DAW automation; open instances in the same plugin process update together. The recorded-loop waveform remains visible on its dedicated lower strip.
+
+### 0.3.12: pitch lock and reverb contrast
+
+**PITCH LOCK**, beside the reactor, protects transpose during reactor dragging and double-click reset. Scan remains available left/right. The lock is stored with the DAW session, independently of sound presets; explicit tuning edits and host pitch automation remain active.
+
+Reverb styles now use distinct delay sizes, predelays, damping and decay: Bright is compact and crisp; Dark is smaller and damped; Hall has a delayed, spacious bloom; Infinite has a long diffuse tail (not literal endless freeze). The upper end of Space brings a much stronger reverb wash and reduces the direct effect. Style changes crossfade and Space changes are smoothed. Existing presets with Space enabled will sound different; parameter IDs and saved values remain compatible.

@@ -3,8 +3,9 @@ set -euo pipefail
 
 # Release mode deliberately requires both signing identities and notarization.
 mode="${1:---release}"
-if [[ "$mode" != --release && "$mode" != --unsigned ]]; then
-  echo "Usage: bash scripts/package-macos.sh [--release|--unsigned]" >&2
+include_aax="${2:-}"
+if [[ ( "$mode" != --release && "$mode" != --unsigned ) || ( -n "$include_aax" && "$include_aax" != --include-aax ) ]]; then
+  echo "Usage: bash scripts/package-macos.sh [--release|--unsigned] [--include-aax]" >&2
   exit 2
 fi
 [[ "$(uname -s)" == Darwin ]] || { echo "Requires macOS." >&2; exit 1; }
@@ -42,7 +43,30 @@ for format in vst3 component; do
   codesign --verify --deep --strict "$target"
 done
 
+if [[ "$include_aax" == --include-aax ]]; then
+  original="${MOTEFIELD_SIGNED_AAX_PATH:-${source_dir}/MoteField.aaxplugin}"
+  [[ -d "$original" ]] || { echo "Missing AAX bundle: $original" >&2; exit 1; }
+  bundle_version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "${original}/Contents/Info.plist")"
+  [[ "$bundle_version" == "$version" ]] || { echo "AAX version differs." >&2; exit 1; }
+  lipo "${original}/Contents/MacOS/MoteField" -verify_arch arm64 x86_64
+  target="${payload}/Library/Application Support/Avid/Audio/Plug-Ins/MoteField.aaxplugin"
+  mkdir -p "$(dirname "$target")"
+  ditto "$original" "$target"
+  if [[ "$mode" == --release ]]; then
+    # Eden covers the whole bundle. Never re-sign/modify it with codesign here.
+    : "${MOTEFIELD_SIGNED_AAX_PATH:?Set the path of the final PACE-signed AAX bundle}"
+    "${PACE_WRAPTOOL:-wraptool}" verify --in "$target"
+    codesign --verify --deep --strict "$target"
+    codesign -dvv "$target" 2>&1 | grep -q 'Authority=Developer ID Application:' || {
+      echo "AAX must also carry a Developer ID Application signature." >&2; exit 1;
+    }
+  fi
+fi
+
 # Disable bundle relocation so a previous per-user copy cannot redirect installation.
+python3 "${project_dir}/scripts/collect-notices.py" \
+  --juce-dir "${project_dir}/build-macos/_deps/juce-src" \
+  --output "${payload}/Library/Application Support/Rango Labs/MoteField/Notices"
 pkgbuild --analyze --root "$payload" "${work_dir}/components.plist"
 python3 - "${work_dir}/components.plist" <<'PY'
 import plistlib, sys
@@ -78,6 +102,7 @@ else
   suffix="-UNSIGNED"
 fi
 package="${output_dir}/MoteField-${version}-macOS-universal${suffix}.pkg"
+[[ -z "$include_aax" ]] || package="${output_dir}/MoteField-${version}-macOS-universal-AAX${suffix}.pkg"
 productbuild --distribution "${work_dir}/distribution.xml" --package-path "$work_dir" \
   --resources "${project_dir}/packaging/macos" ${sign_args[@]+"${sign_args[@]}"} "${work_dir}/installer.pkg"
 if [[ "$mode" == --release ]]; then

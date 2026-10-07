@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.22)
 
-project(MoteField VERSION 0.3.10 LANGUAGES C CXX)
+project(MoteField VERSION 0.3.13 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -21,9 +21,21 @@ if(APPLE)
     list(APPEND MOTEFIELD_FORMATS AU)
 endif()
 
+option(MOTEFIELD_BUILD_AAX "Build AAX Native (requires PACE signing for retail Pro Tools)" OFF)
+set(MOTEFIELD_AAX_SDK_PATH "" CACHE PATH "Optional external AAX SDK; empty uses JUCE's bundled SDK")
+if(MOTEFIELD_BUILD_AAX)
+    if(NOT APPLE AND NOT WIN32)
+        message(FATAL_ERROR "MoteField AAX supports macOS and Windows only")
+    endif()
+    if(MOTEFIELD_AAX_SDK_PATH)
+        juce_set_aax_sdk_path("${MOTEFIELD_AAX_SDK_PATH}")
+    endif()
+    list(APPEND MOTEFIELD_FORMATS AAX)
+endif()
+
 juce_add_plugin(MoteField
     COMPANY_NAME "Rango Labs"
-    COMPANY_WEBSITE "https://rangolabs.com"
+    COMPANY_WEBSITE "https://www.rangolabs.co"
     BUNDLE_ID "com.rangolabs.motefield"
     PLUGIN_MANUFACTURER_CODE Rngo
     PLUGIN_CODE MtFd
@@ -38,6 +50,9 @@ juce_add_plugin(MoteField
     COPY_PLUGIN_AFTER_BUILD FALSE
     VST3_CATEGORIES Fx
     AU_MAIN_TYPE kAudioUnitType_Effect
+    AAX_IDENTIFIER "com.rangolabs.motefield"
+    AAX_CATEGORY Effect
+    DISABLE_AAX_MULTI_MONO TRUE
 )
 
 juce_add_binary_data(RangoAssets SOURCES Assets/RangoLogo.png Assets/OpenSauceMedium.ttf Assets/OpenSauceBold.ttf Assets/HardwarePrint.svg Assets/AcidEnclosure-v1.png Assets/AcidKnob-v1.png)
@@ -62,6 +77,7 @@ target_compile_definitions(MoteField PUBLIC
     JUCE_DISPLAY_SPLASH_SCREEN=0
     JUCE_REPORT_APP_USAGE=0
     JUCE_VST3_CAN_REPLACE_VST2=0
+    JucePlugin_AAXDisableAudioSuite=1
 )
 
 target_link_libraries(MoteField

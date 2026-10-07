@@ -7,7 +7,7 @@ if [[ "$(uname -s)" != "Darwin" ]]; then
 fi
 
 project_dir="$(cd "$(dirname "$0")/.." && pwd)"
-dist_dir="${project_dir}/dist/macos"
+dist_dir="${MOTEFIELD_MACOS_SOURCE_DIR:-${project_dir}/dist/macos}"
 for bundle in MoteField.vst3 MoteField.component; do
   if [[ ! -d "${dist_dir}/${bundle}" ]]; then
     echo "Missing ${bundle}. Run bash scripts/build-macos.sh first."
