@@ -6,7 +6,7 @@ Work is on `release/desktop-signing-aax-0313`; main and public releases are unch
 
 | Track | Completed | Remaining |
 | --- | --- | --- |
-| macOS AU/VST3 | Universal build, Developer ID Application signing, hardened runtime, timestamps, Apple notarization, stapling and Gatekeeper assessment of the DMG. Installed AU validation passes on arm64 and x86_64. | Clean-machine downloaded installation and DAW listening/automation checks. Optional signed PKG needs a Developer ID Installer certificate. |
+| macOS AU/VST3 | Universal build, Developer ID Application signing, hardened runtime, timestamps, Apple notarization, stapling and Gatekeeper assessment of the DMG. Installed AU validation passes on arm64 and x86_64. | Clean-machine downloaded installation and DAW listening/automation checks. The requested automatic installer PKG needs a Developer ID Installer certificate. |
 | AAX Native | Universal macOS and Windows x64 builds; development installers use standard Avid folders. Windows installer/uninstaller checks pass. Commercial/PACE onboarding request sent to Avid. | Avid commercial agreement and publisher/PACE access; Pro Tools Developer host tests; final PACE-signed retail Pro Tools tests, including save/reopen. |
 | Windows signing | Unsigned VST3/AAX build and installer checks pass. Signing scripts support a certificate store or Artifact Signing. | Account setup and signing are deferred at the user's request. |
 

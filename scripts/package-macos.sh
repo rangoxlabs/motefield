@@ -86,6 +86,7 @@ cat > "${work_dir}/distribution.xml" <<EOF
 <installer-gui-script minSpecVersion="2">
   <title>MoteField — Rango Labs</title>
   <welcome file="welcome.html" mime-type="text/html"/>
+  <conclusion file="conclusion.html" mime-type="text/html"/>
   <options customize="never" require-scripts="false" hostArchitectures="arm64,x86_64"/>
   <domains enable_localSystem="true" enable_currentUserHome="false" enable_anywhere="false"/>
   <volume-check script="true"><allowed-os-versions><os-version min="11.0"/></allowed-os-versions></volume-check>
