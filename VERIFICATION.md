@@ -16,6 +16,10 @@ The final AU/VST3 DMG was accepted by Apple with no issues, stapled, and accepte
 
 Still pending: Pro Tools Developer instantiation/audio/automation; final PACE-signed retail Pro Tools save/reopen; clean-machine downloaded installation; actual Mac/Windows DAW listening and automation playback; JUCE license confirmation. Signed PKG awaits an Installer identity; the notarized DMG is complete. Windows account/signing setup is deferred. Main and public releases remain unchanged.
 
+## Automatic installer flow — 2026-10-07
+
+Updated the PKG welcome/completion pages and rebuilt the standard unsigned package. Expanded-package checks passed for resources, distribution XML, version, AU/VST3 system destinations and checksum. Native Apple Installer preview reached the all-users destination and Standard Install screen; installation was not executed. Final package signing/notarization still awaits the Developer ID Installer certificate. Plug-in source and the previously notarized DMG are unchanged.
+
 # Historical verification
 
 ## Windows 0.3.12 complete — 2026-09-21
